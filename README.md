@@ -6,7 +6,7 @@ The goal is to turn an Android phone into a 5G/LTE coverage sensor: after the us
 
 ## Current Status
 
-Planning and project setup plus a minimal Android "hello" skeleton.
+Planning and project setup plus a simulator-friendly Android scanner prototype.
 
 The Android app name is `Ask`, and the package/application id is `no.politiet.pit`.
 
@@ -47,9 +47,9 @@ external/node-scanner/data/*.jsonl
 
 Only `app/` exists right now. The other modules can be added when the scanner logic starts to grow.
 
-## Android Skeleton
+## Android Prototype
 
-The current Android skeleton is intentionally tiny:
+The current Android app is intentionally tiny:
 
 ```text
 settings.gradle.kts
@@ -60,6 +60,15 @@ app/src/main/java/no/politiet/pit/MainActivity.kt
 ```
 
 It uses a single native Android `Activity` and avoids Compose, AndroidX, and third-party dependencies for now. Android Studio can open the project and sync Gradle.
+
+The emulator build currently uses mock telemetry. It supports:
+
+- Blocking first-run consent before scanner controls are shown
+- Grant app-level consent
+- Automatic mock scanning after consent
+- Single pause/resume control on the main scanner screen
+- View sample count, last sample time, and mock radio output
+- Separate settings screen for sampling frequency and GNSS mode
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
