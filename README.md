@@ -6,7 +6,11 @@ The goal is to turn an Android phone into a 5G/LTE coverage sensor: after the us
 
 ## Current Status
 
-Planning and project setup only. The Android app skeleton will be generated later with Android Studio.
+Planning and project setup plus a minimal Android "hello" skeleton.
+
+The Android app name is `Ask`, and the package/application id is `no.politiet.pit`.
+
+The current product direction is a small, consent-led scanner app: the user voluntarily turns scanning on, can pause or stop it, and can revoke participation. Initial logging is local-only; upload/sync behavior is intentionally deferred.
 
 ## Reference Project
 
@@ -32,7 +36,7 @@ external/node-scanner/data/*.jsonl
 
 ```text
 5g-scanner-android/
-  app/                  Android application module, created later
+  app/                  Android application module
   core/                 Plain Kotlin domain models and JSONL encoding
   telemetry/            Android location/connectivity/cellular collectors
   storage/              Log persistence and export
@@ -41,7 +45,23 @@ external/node-scanner/data/*.jsonl
     node-scanner/       Reference Node/TypeScript scanner submodule
 ```
 
-The exact Gradle layout can change once Android Studio creates the project.
+Only `app/` exists right now. The other modules can be added when the scanner logic starts to grow.
+
+## Android Skeleton
+
+The current Android skeleton is intentionally tiny:
+
+```text
+settings.gradle.kts
+build.gradle.kts
+app/build.gradle.kts
+app/src/main/AndroidManifest.xml
+app/src/main/java/no/politiet/pit/MainActivity.kt
+```
+
+It uses a single native Android `Activity` and avoids Compose, AndroidX, and third-party dependencies for now. Android Studio can open the project and sync Gradle.
+
+The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
 ## Output Format
 
@@ -52,6 +72,25 @@ one CoverageSample JSON object per line
 ```
 
 See [docs/output-contract.md](docs/output-contract.md) for the current contract notes.
+
+## Product and Privacy Notes
+
+Planning docs:
+
+```text
+docs/product-notes.md
+docs/privacy-consent.md
+docs/settings-model.md
+docs/architecture-notes.md
+```
+
+Core first-version assumptions:
+
+- Scanning requires app-level consent and Android permission grants
+- Consent can be revoked separately from OS permissions
+- The main UI should expose a clear scanning on/off control
+- Settings should include sampling frequency, pause controls, and location/GNSS behavior
+- Local logging comes before any upload/sync feature
 
 ## Notes
 
