@@ -1,0 +1,3 @@
+[submodule "external/node-scanner"]
+	path = external/node-scanner
+	url = git@github.com:kjetilhp/5g-scanner.git
