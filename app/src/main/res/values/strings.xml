@@ -11,6 +11,7 @@
     <string name="status_stopped_until">Scanner will start %1$s</string>
     <string name="status_scanning">Scanner active</string>
     <string name="latest_measurement_title">Latest measurement</string>
+    <string name="no_data">No data</string>
     <string name="measurement_help_action">Explain measurements</string>
     <string name="measurement_help_title">Signal measurements</string>
     <string name="measurement_help_body">RSRP (dBm)\nReceived signal power. Less negative is better.\n\nRSRQ (dB)\nSignal quality compared with interference and load. Less negative is better.\n\nSINR (dB)\nSignal-to-noise ratio. Higher is better.\n\nGNSS (HDOP / age)\nLower HDOP and a newer fix are better.\n\nWhite line\nPrevious sample.</string>

@@ -329,6 +329,9 @@ class MainActivity : Activity() {
         )
         sessionSampleText?.visibility = if (canSample()) View.VISIBLE else View.INVISIBLE
         titleSignalIcon?.setQuality(latestTelemetry.overallQuality(), animate = sampleCount > 0)
+        if (!canSample()) {
+            telemetryBars?.showNoData()
+        }
         stopStartButton?.apply {
             if (isStopped()) {
                 setImageResource(R.drawable.ic_play_arrow_32)
@@ -724,6 +727,7 @@ class MainActivity : Activity() {
 
     private inner class TelemetryBarsView : View(this@MainActivity) {
         private var metrics: List<MetricQuality> = emptyList()
+        private var showNoData = false
         private var animatedQualities: List<Float> = emptyList()
         private var previousSampleQualities: List<Float> = emptyList()
         private var animatedPreviousQualities: List<Float> = emptyList()
@@ -762,7 +766,13 @@ class MainActivity : Activity() {
             textAlign = Paint.Align.CENTER
             textSize = dp(11).toFloat()
         }
+        private val emptyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SCANNER_SOFT_TEXT
+            textAlign = Paint.Align.CENTER
+            textSize = dp(16).toFloat()
+        }
         private val barBounds = RectF()
+        private val barClipPath = Path()
         private val gnssPanelPath = Path()
 
         init {
@@ -773,6 +783,7 @@ class MainActivity : Activity() {
         fun setMetrics(metrics: List<MetricQuality>, animate: Boolean) {
             val previousMetrics = this.metrics
             val previousQualities = animatedQualities.ifEmpty { previousMetrics.map { it.quality } }
+            showNoData = false
             this.metrics = metrics
             contentDescription = metrics.joinToString(separator = ", ") {
                 "${it.label} ${it.valueText}"
@@ -816,8 +827,25 @@ class MainActivity : Activity() {
             }
         }
 
+        fun showNoData() {
+            barAnimator?.cancel()
+            showNoData = true
+            metrics = emptyList()
+            animatedQualities = emptyList()
+            previousSampleQualities = emptyList()
+            animatedPreviousQualities = emptyList()
+            hasComparisonSample = false
+            contentDescription = getString(R.string.no_data)
+            invalidate()
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            if (showNoData) {
+                val centerY = height / 2f - (emptyPaint.descent() + emptyPaint.ascent()) / 2f
+                canvas.drawText(getString(R.string.no_data), width / 2f, centerY, emptyPaint)
+                return
+            }
             if (metrics.isEmpty()) return
 
             val top = dp(22).toFloat()
@@ -843,8 +871,7 @@ class MainActivity : Activity() {
                 val animatedQuality = animatedQualities.getOrElse(index) { metric.quality }
                 val fillTop = bottom - availableHeight * animatedQuality
                 fillPaint.color = qualityColor(animatedQuality)
-                barBounds.set(left, fillTop, right, bottom)
-                canvas.drawRoundRect(barBounds, dp(14).toFloat(), dp(14).toFloat(), fillPaint)
+                drawMaskedBarFill(canvas, left, top, right, bottom, fillTop)
 
                 animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
                     val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
@@ -877,6 +904,24 @@ class MainActivity : Activity() {
             gnssPanelPath.lineTo(left, bottom)
             gnssPanelPath.close()
             canvas.drawPath(gnssPanelPath, gnssPanelPaint)
+        }
+
+        private fun drawMaskedBarFill(
+            canvas: Canvas,
+            left: Float,
+            top: Float,
+            right: Float,
+            bottom: Float,
+            fillTop: Float,
+        ) {
+            val checkpoint = canvas.save()
+            barBounds.set(left, top, right, bottom)
+            barClipPath.reset()
+            barClipPath.addRoundRect(barBounds, dp(14).toFloat(), dp(14).toFloat(), Path.Direction.CW)
+            canvas.clipPath(barClipPath)
+            canvas.clipRect(left, fillTop, right, bottom)
+            canvas.drawRect(left, fillTop, right, bottom, fillPaint)
+            canvas.restoreToCount(checkpoint)
         }
 
         private fun drawPreviousMarkerArrow(
