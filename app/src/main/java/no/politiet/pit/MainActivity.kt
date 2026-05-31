@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private var lastReportedAt: Instant? = null
 
     private var telemetryBars: TelemetryBarsView? = null
+    private var telemetryHelpButton: ImageButton? = null
     private var titleSignalIcon: SignalQualityIconView? = null
     private var rfSignalBackground: RfSignalBackgroundView? = null
     private var stopStartButton: ImageButton? = null
@@ -131,24 +132,24 @@ class MainActivity : Activity() {
             showingSettings && settingsDestination == SettingsDestination.LogFile -> {
                 settingsDestination = SettingsDestination.LogList
                 selectedLogFile = null
-                render()
+                render(ScreenTransition.Back)
             }
             showingSettings && settingsDestination == SettingsDestination.LogList -> {
                 settingsDestination = SettingsDestination.Main
-                render()
+                render(ScreenTransition.Back)
             }
             showingSettings -> {
                 showingSettings = false
                 settingsDestination = SettingsDestination.Main
                 selectedLogFile = null
-                render()
+                render(ScreenTransition.Back)
             }
             else -> super.onBackPressed()
         }
     }
 
-    private fun render() {
-        setContentView(when {
+    private fun render(transition: ScreenTransition = ScreenTransition.None) {
+        val nextView = when {
             !consentGranted -> createConsentView()
             showingSettings -> when (settingsDestination) {
                 SettingsDestination.Main -> createSettingsView()
@@ -156,12 +157,32 @@ class MainActivity : Activity() {
                 SettingsDestination.LogFile -> createLogFileView()
             }
             else -> createScannerView()
-        })
+        }
+        setContentView(nextView)
+        animateScreenTransition(nextView, transition)
         if (consentGranted) {
             ensureSamplerState()
             ensureReportingScheduler()
             updateScannerUi()
         }
+    }
+
+    private fun animateScreenTransition(view: View, transition: ScreenTransition) {
+        if (transition == ScreenTransition.None) return
+
+        val direction = when (transition) {
+            ScreenTransition.Forward -> 1f
+            ScreenTransition.Back -> -1f
+            ScreenTransition.None -> 0f
+        }
+        view.alpha = 0f
+        view.translationX = resources.displayMetrics.widthPixels * 0.12f * direction
+        view.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(240L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
     }
 
     private fun createConsentView(): View {
@@ -215,14 +236,27 @@ class MainActivity : Activity() {
 
         content.addView(scannerTitleBlock())
 
-        content.addView(scannerSectionHeader(getString(R.string.latest_measurement_title)))
         telemetryBars = TelemetryBarsView().apply {
             setMetrics(latestTelemetry.metrics(), animate = false)
         }
-        content.addView(telemetryBars, LinearLayout.LayoutParams(
+        telemetryHelpButton = measurementHelpButton()
+        val telemetryPanel = FrameLayout(this).apply {
+            addView(telemetryBars, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp(244),
+            ).apply {
+                topMargin = 0
+            })
+            addView(telemetryHelpButton, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = 0
+            })
+        }
+        content.addView(telemetryPanel, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(244),
-        ))
+            dp(292),
+        ).apply {
+            topMargin = dp(58)
+        })
 
         val scrollView = ScrollView(this).apply {
             isFillViewport = true
@@ -243,12 +277,6 @@ class MainActivity : Activity() {
         }
 
         scannerActivityRing = ScannerActivityRing()
-        val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
-            showingSettings = true
-            settingsDestination = SettingsDestination.Main
-            selectedLogFile = null
-            render()
-        }
 
         return FrameLayout(this).apply {
             setBackgroundColor(SCANNER_BACKGROUND)
@@ -267,10 +295,6 @@ class MainActivity : Activity() {
             })
             addView(stopStartButton, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin
-            })
-            addView(settingsButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply {
-                marginEnd = dp(24)
-                bottomMargin = navigationBarHeight() + dp(40)
             })
         }
     }
@@ -323,7 +347,7 @@ class MainActivity : Activity() {
                 value = "",
             ) {
                 settingsDestination = SettingsDestination.LogList
-                render()
+                render(ScreenTransition.Forward)
             },
         ))
 
@@ -392,7 +416,7 @@ class MainActivity : Activity() {
                 ) {
                     selectedLogFile = logFile
                     settingsDestination = SettingsDestination.LogFile
-                    render()
+                    render(ScreenTransition.Forward)
                 }
             }
             content.addView(settingsGroup(*rows.toTypedArray()))
@@ -412,7 +436,7 @@ class MainActivity : Activity() {
             backDescription = getString(R.string.back_to_settings),
             onBack = {
                 settingsDestination = SettingsDestination.Main
-                render()
+                render(ScreenTransition.Back)
             },
             body = content,
         )
@@ -477,7 +501,7 @@ class MainActivity : Activity() {
             onBack = {
                 settingsDestination = SettingsDestination.LogList
                 selectedLogFile = null
-                render()
+                render(ScreenTransition.Back)
             },
             body = content,
         )
@@ -486,6 +510,7 @@ class MainActivity : Activity() {
     private fun clearScannerViews() {
         telemetryBars = null
         titleSignalIcon = null
+        telemetryHelpButton = null
         rfSignalBackground?.setScanning(false)
         rfSignalBackground = null
         stopStartButtonPulse()
@@ -618,6 +643,7 @@ class MainActivity : Activity() {
         if (!canSample()) {
             telemetryBars?.showNoData()
         }
+        telemetryHelpButton?.visibility = if (canSample()) View.VISIBLE else View.GONE
         stopStartButton?.apply {
             if (isStopped()) {
                 setImageResource(R.drawable.ic_play_arrow_32)
@@ -769,7 +795,17 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, dp(18))
 
-            addView(scannerTitleHeader())
+            addView(FrameLayout(this@MainActivity).apply {
+                addView(scannerTitleHeader(), FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER,
+                ))
+                addView(headerSettingsButton(), FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             addView(TextView(this@MainActivity).apply {
                 text = getString(R.string.app_subtitle)
                 textSize = 14f
@@ -803,39 +839,38 @@ class MainActivity : Activity() {
             ))
         }
 
-    private fun scannerSection(text: String): TextView = TextView(this).apply {
-        this.text = text.uppercase()
-        textSize = 13f
-        setTextColor(SCANNER_SOFT_TEXT)
-        includeFontPadding = false
-        setPadding(0, dp(12), 0, dp(10))
-    }
+    private fun headerSettingsButton(): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(R.drawable.ic_settings_24)
+            setColorFilter(SCANNER_SOFT_TEXT)
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = getString(R.string.open_settings)
+            background = RippleDrawable(
+                ColorStateList.valueOf(SCANNER_BUTTON_RIPPLE),
+                roundedBackground(Color.TRANSPARENT, dp(24)),
+                roundedBackground(Color.WHITE, dp(24)),
+            )
+            setOnClickListener {
+                showingSettings = true
+                settingsDestination = SettingsDestination.Main
+                selectedLogFile = null
+                render(ScreenTransition.Forward)
+            }
+        }
 
-    private fun scannerSectionHeader(text: String): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(12), 0, dp(10))
-
-            addView(TextView(this@MainActivity).apply {
-                this.text = text.uppercase()
-                textSize = 13f
-                setTextColor(SCANNER_SOFT_TEXT)
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-
-            addView(ImageButton(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_help_24)
-                setColorFilter(SCANNER_SOFT_TEXT)
-                scaleType = ImageView.ScaleType.CENTER
-                contentDescription = getString(R.string.measurement_help_action)
-                background = RippleDrawable(
-                    ColorStateList.valueOf(SCANNER_BUTTON_RIPPLE),
-                    roundedBackground(Color.TRANSPARENT, dp(18)),
-                    roundedBackground(Color.WHITE, dp(18)),
-                )
-                setOnClickListener { showMeasurementHelp() }
-            }, LinearLayout.LayoutParams(dp(36), dp(36)))
+    private fun measurementHelpButton(): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(R.drawable.ic_help_24)
+            setColorFilter(SCANNER_SOFT_TEXT)
+            scaleType = ImageView.ScaleType.CENTER
+            visibility = View.GONE
+            contentDescription = getString(R.string.measurement_help_action)
+            background = RippleDrawable(
+                ColorStateList.valueOf(SCANNER_BUTTON_RIPPLE),
+                roundedBackground(Color.TRANSPARENT, dp(20)),
+                roundedBackground(Color.WHITE, dp(20)),
+            )
+            setOnClickListener { showMeasurementHelp() }
         }
 
     private fun showMeasurementHelp() {
@@ -914,7 +949,7 @@ class MainActivity : Activity() {
             showingSettings = false
             settingsDestination = SettingsDestination.Main
             selectedLogFile = null
-            render()
+            render(ScreenTransition.Back)
         },
     ): LinearLayout =
         LinearLayout(this).apply {
@@ -1194,6 +1229,7 @@ class MainActivity : Activity() {
         private var waves = newWaveSpecs()
         private var spectrumBars = newSpectrumBars()
         private var staticFlecks = newStaticFlecks()
+        private var dormantFlecks = newDormantFlecks()
         private val ripples = mutableListOf<RfRipple>()
         private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -1215,7 +1251,7 @@ class MainActivity : Activity() {
         fun setScanning(isScanning: Boolean, signalQuality: Float = intensity) {
             intensity = signalQuality.coerceIn(0f, 1f)
             if (scanning == isScanning) {
-                if (scanning) invalidate()
+                invalidate()
                 return
             }
 
@@ -1224,6 +1260,7 @@ class MainActivity : Activity() {
                 beginScanSession()
                 postInvalidateOnAnimation()
             } else {
+                dormantFlecks = newDormantFlecks()
                 ripples.clear()
                 invalidate()
             }
@@ -1258,7 +1295,11 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (!scanning || windowVisibility != VISIBLE || width <= 0 || height <= 0) return
+            if (windowVisibility != VISIBLE || width <= 0 || height <= 0) return
+            if (!scanning) {
+                drawDormantAfterglow(canvas)
+                return
+            }
 
             val now = SystemClock.uptimeMillis()
             val seconds = (now - scanStartedAtMs) / 1000f
@@ -1283,6 +1324,77 @@ class MainActivity : Activity() {
             staticFlecks = newStaticFlecks()
             ripples.clear()
             addRipple(width * random.nextFloatIn(0.18f, 0.82f), height * random.nextFloatIn(0.18f, 0.72f), touch = false)
+        }
+
+        private fun drawDormantAfterglow(canvas: Canvas) {
+            drawDormantAnalyzer(canvas)
+            dormantFlecks.forEach { fleck ->
+                fillPaint.alpha = (SCANNER_RF_DORMANT_ALPHA * fleck.alpha).toInt().coerceIn(0, SCANNER_RF_DORMANT_ALPHA)
+                if (fleck.isDash) {
+                    val x = width * fleck.x
+                    val y = height * fleck.y
+                    canvas.drawRoundRect(
+                        x,
+                        y,
+                        x + dp(8).toFloat() + fleck.size * 5f,
+                        y + fleck.size,
+                        fleck.size / 2f,
+                        fleck.size / 2f,
+                        fillPaint,
+                    )
+                } else {
+                    canvas.drawCircle(width * fleck.x, height * fleck.y, fleck.size, fillPaint)
+                }
+            }
+
+            fillPaint.alpha = 255
+        }
+
+        private fun drawDormantAnalyzer(canvas: Canvas) {
+            val baseY = height + dp(1).toFloat()
+            val barWidth = maxOf(dp(2).toFloat(), width / 116f)
+            val maxBarHeight = height * 0.13f
+            fillPaint.alpha = SCANNER_RF_DORMANT_BAR_ALPHA
+            repeat(42) { index ->
+                val x = width * (index / 41f)
+                val noise = hashStaticTick(index * 131 + 17)
+                val clusterA = dormantClusterEnergy(index / 41f, 0.26f, 0.11f)
+                val clusterB = dormantClusterEnergy(index / 41f, 0.68f, 0.08f)
+                val heightFactor = (0.06f + noise * 0.14f + clusterA * 0.52f + clusterB * 0.34f).coerceIn(0.04f, 0.72f)
+                canvas.drawRoundRect(
+                    x,
+                    baseY - maxBarHeight * heightFactor,
+                    x + barWidth,
+                    baseY,
+                    barWidth / 2f,
+                    barWidth / 2f,
+                    fillPaint,
+                )
+            }
+
+            linePaint.strokeWidth = dp(1).toFloat()
+            linePaint.alpha = SCANNER_RF_DORMANT_TRACE_ALPHA
+            wavePath.reset()
+            val centerY = height * 0.34f
+            val amplitude = height * 0.012f
+            val step = maxOf(10f, width / 64f)
+            var x = -step
+            while (x <= width + step) {
+                val phase = (x / width.coerceAtLeast(1).toFloat()) * Math.PI.toFloat() * 4.2f
+                val y = centerY + kotlin.math.sin(phase + 0.85f) * amplitude
+                if (x <= -step) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
+                x += step
+            }
+            canvas.drawPath(wavePath, linePaint)
+
+            linePaint.alpha = 255
+            fillPaint.alpha = 255
+        }
+
+        private fun dormantClusterEnergy(x: Float, center: Float, width: Float): Float {
+            val distance = kotlin.math.abs(x - center)
+            val falloff = (1f - distance / width).coerceIn(0f, 1f)
+            return falloff * falloff
         }
 
         private fun drawSineWaves(canvas: Canvas, seconds: Float, activity: Float) {
@@ -1489,22 +1601,24 @@ class MainActivity : Activity() {
                 )
             }
 
+        private fun newDormantFlecks(): List<RfStaticFleck> =
+            List(86) {
+                RfStaticFleck(
+                    x = random.nextFloatIn(0f, 1f),
+                    y = random.nextFloatIn(0.06f, 0.96f),
+                    size = random.nextFloatIn(0.55f, 1.45f) * resources.displayMetrics.density,
+                    threshold = 0f,
+                    alpha = random.nextFloatIn(0.32f, 1f),
+                    isDash = random.nextFloat() > 0.84f,
+                )
+            }
+
         private fun hashStaticTick(value: Int): Float {
             var hash = value * 1103515245 + 12345
             hash = hash xor (hash ushr 16)
             return (hash and 0x7fffffff).toFloat() / Int.MAX_VALUE.toFloat()
         }
     }
-
-    private data class SleepSpec(
-        val x: Float,
-        val y: Float,
-        val driftX: Float,
-        val driftY: Float,
-        val size: Int,
-        val durationMs: Long,
-        val startedAtMs: Long,
-    )
 
     private data class RfWaveSpec(
         val y: Float,
@@ -1561,8 +1675,6 @@ class MainActivity : Activity() {
         private var hasComparisonSample = false
         private var barAnimator: ValueAnimator? = null
         private var visibilityAnimator: ValueAnimator? = null
-        private val sleepRandom = Random(System.nanoTime())
-        private val sleepSpecs = MutableList(6) { randomTelemetrySleepSpec() }
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = SCANNER_BAR_TRACK
             style = Paint.Style.FILL
@@ -1600,10 +1712,6 @@ class MainActivity : Activity() {
             color = SCANNER_SOFT_TEXT
             textAlign = Paint.Align.CENTER
             textSize = dp(16).toFloat()
-        }
-        private val sleepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textAlign = Paint.Align.CENTER
         }
         private val barBounds = RectF()
         private val barClipPath = Path()
@@ -1680,10 +1788,6 @@ class MainActivity : Activity() {
                 emptyPaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
                 canvas.drawText(getString(R.string.no_data), width / 2f, centerY, emptyPaint)
                 emptyPaint.alpha = SCANNER_SOFT_TEXT_ALPHA
-                drawTelemetrySleep(canvas)
-                if (showNoData) {
-                    postInvalidateOnAnimation()
-                }
             }
             if (metrics.isEmpty() || barsAlpha <= 0f) return
 
@@ -1767,54 +1871,6 @@ class MainActivity : Activity() {
                     invalidate()
                 }
                 start()
-            }
-        }
-
-        private fun drawTelemetrySleep(canvas: Canvas) {
-            val now = System.currentTimeMillis()
-            sleepSpecs.forEachIndexed { index, spec ->
-                val age = now - spec.startedAtMs
-                val phase = age.toFloat() / spec.durationMs.toFloat()
-                if (phase >= 1f) {
-                    sleepSpecs[index] = randomTelemetrySleepSpec(now)
-                    return@forEachIndexed
-                }
-
-                val fade = kotlin.math.sin(phase * Math.PI.toFloat()).coerceIn(0f, 1f)
-                sleepPaint.alpha = (120 * noDataAlpha * fade).toInt().coerceIn(0, 120)
-                sleepPaint.textSize = spec.size.toFloat()
-                val x = width * (spec.x + spec.driftX * phase)
-                val y = height * (spec.y + spec.driftY * phase)
-                canvas.drawText("z", x, y, sleepPaint)
-            }
-            sleepPaint.alpha = 255
-        }
-
-        private fun randomTelemetrySleepSpec(startedAtMs: Long = System.currentTimeMillis()): SleepSpec {
-            val position = randomTelemetrySleepPosition()
-            return SleepSpec(
-                x = position.first,
-                y = position.second,
-                driftX = sleepRandom.nextFloatIn(-0.035f, 0.035f),
-                driftY = -sleepRandom.nextFloatIn(0.04f, 0.11f),
-                size = sleepRandom.nextFloatIn(dp(18).toFloat(), dp(26).toFloat()).toInt(),
-                durationMs = sleepRandom.nextLong(1_900L, 3_100L),
-                startedAtMs = startedAtMs - sleepRandom.nextLong(0L, 1_200L),
-            )
-        }
-
-        private fun randomTelemetrySleepPosition(): Pair<Float, Float> {
-            repeat(12) {
-                val x = sleepRandom.nextFloatIn(0.08f, 0.92f)
-                val y = sleepRandom.nextFloatIn(0.18f, 0.86f)
-                val insideNoDataBand = x in 0.26f..0.74f && y in 0.42f..0.62f
-                if (!insideNoDataBand) return x to y
-            }
-
-            return if (sleepRandom.nextBoolean()) {
-                sleepRandom.nextFloatIn(0.08f, 0.92f) to sleepRandom.nextFloatIn(0.18f, 0.36f)
-            } else {
-                sleepRandom.nextFloatIn(0.08f, 0.92f) to sleepRandom.nextFloatIn(0.68f, 0.86f)
             }
         }
 
@@ -2073,6 +2129,12 @@ class MainActivity : Activity() {
         LogFile,
     }
 
+    private enum class ScreenTransition {
+        None,
+        Forward,
+        Back,
+    }
+
     private companion object {
         const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
@@ -2088,6 +2150,9 @@ class MainActivity : Activity() {
         const val SCANNER_RF_WAVE_ALPHA: Int = 56
         const val SCANNER_RF_BAR_ALPHA: Int = 42
         const val SCANNER_RF_STATIC_ALPHA: Int = 62
+        const val SCANNER_RF_DORMANT_ALPHA: Int = 38
+        const val SCANNER_RF_DORMANT_BAR_ALPHA: Int = 34
+        const val SCANNER_RF_DORMANT_TRACE_ALPHA: Int = 32
         val SCANNER_BAR_TRACK: Int = Color.argb(38, 255, 255, 255)
         const val SCANNER_BAR_TRACK_ALPHA: Int = 38
         val SCANNER_GNSS_PANEL: Int = Color.argb(34, 0, 0, 0)
