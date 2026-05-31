@@ -17,8 +17,10 @@ import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
@@ -58,8 +60,8 @@ class MainActivity : Activity() {
     private var statusText: TextView? = null
     private var telemetryBars: TelemetryBarsView? = null
     private var titleSignalIcon: SignalQualityIconView? = null
+    private var rfSignalBackground: RfSignalBackgroundView? = null
     private var stopStartButton: ImageButton? = null
-    private var sleepIndicator: SleepIndicatorView? = null
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
@@ -196,6 +198,11 @@ class MainActivity : Activity() {
             isFillViewport = true
             addView(content)
         }
+        rfSignalBackground = RfSignalBackgroundView()
+        scrollView.setOnTouchListener { _, event ->
+            rfSignalBackground?.handleScannerTouch(event)
+            false
+        }
 
         stopStartButton = scannerIconButton(R.drawable.ic_stop_32, getString(R.string.stop_scanning), dp(56)) {
             if (!isStopped()) {
@@ -207,7 +214,6 @@ class MainActivity : Activity() {
 
         statusText = scannerStatusText()
         scannerActivityRing = ScannerActivityRing()
-        sleepIndicator = SleepIndicatorView()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
             settingsDestination = SettingsDestination.Main
@@ -217,7 +223,15 @@ class MainActivity : Activity() {
 
         return FrameLayout(this).apply {
             setBackgroundColor(SCANNER_BACKGROUND)
+            addView(rfSignalBackground, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ))
             addView(scrollView)
+            setOnTouchListener { _, event ->
+                rfSignalBackground?.handleScannerTouch(event)
+                false
+            }
             val controlBottomMargin = navigationBarHeight() + dp(160)
             addView(statusText, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -233,9 +247,6 @@ class MainActivity : Activity() {
             })
             addView(stopStartButton, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin
-            })
-            addView(sleepIndicator, FrameLayout.LayoutParams(dp(188), dp(188), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = controlBottomMargin - dp(38)
             })
             addView(settingsButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply {
                 marginEnd = dp(24)
@@ -467,9 +478,9 @@ class MainActivity : Activity() {
         statusText = null
         telemetryBars = null
         titleSignalIcon = null
+        rfSignalBackground?.setScanning(false)
+        rfSignalBackground = null
         stopStartButton = null
-        sleepIndicator?.stop()
-        sleepIndicator = null
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
         scannerActivityRing = null
@@ -597,11 +608,9 @@ class MainActivity : Activity() {
             quality = if (canSample()) latestTelemetry.overallQuality() else 0f,
             animate = sampleCount > 0,
         )
+        rfSignalBackground?.setScanning(canSample(), latestTelemetry.overallQuality())
         if (!canSample()) {
             telemetryBars?.showNoData()
-            sleepIndicator?.start()
-        } else {
-            sleepIndicator?.stop()
         }
         stopStartButton?.apply {
             if (isStopped()) {
@@ -1176,86 +1185,315 @@ class MainActivity : Activity() {
         }
     }
 
-    private inner class SleepIndicatorView : View(this@MainActivity) {
-        private var animator: ValueAnimator? = null
-        private val random = Random(System.nanoTime())
-        private val specs = MutableList(5) { randomSleepSpec() }
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private inner class RfSignalBackgroundView : View(this@MainActivity) {
+        private var scanning = false
+        private var scanStartedAtMs = 0L
+        private var lastTouchRippleAtMs = 0L
+        private var intensity = latestTelemetry.overallQuality()
+        private var random = Random(System.nanoTime())
+        private var waves = newWaveSpecs()
+        private var spectrumBars = newSpectrumBars()
+        private var staticFlecks = newStaticFlecks()
+        private val ripples = mutableListOf<RfRipple>()
+        private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textAlign = Paint.Align.CENTER
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
         }
+        private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        private val wavePath = Path()
 
         init {
-            visibility = View.INVISIBLE
+            isClickable = false
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 
-        fun start() {
-            visibility = View.VISIBLE
-            if (animator?.isStarted == true) return
-            animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 16_000L
-                interpolator = LinearInterpolator()
-                repeatCount = ValueAnimator.INFINITE
-                addUpdateListener {
-                    invalidate()
-                }
-                start()
+        fun setScanning(isScanning: Boolean, signalQuality: Float = intensity) {
+            intensity = signalQuality.coerceIn(0f, 1f)
+            if (scanning == isScanning) {
+                if (scanning) invalidate()
+                return
+            }
+
+            scanning = isScanning
+            if (scanning) {
+                beginScanSession()
+                postInvalidateOnAnimation()
+            } else {
+                ripples.clear()
+                invalidate()
             }
         }
 
-        fun stop() {
-            animator?.cancel()
-            animator = null
-            visibility = View.INVISIBLE
-            invalidate()
+        fun handleScannerTouch(event: MotionEvent) {
+            if (!scanning) return
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> addRipple(event.x, event.y, touch = true)
+                MotionEvent.ACTION_MOVE -> {
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastTouchRippleAtMs > 180L) {
+                        lastTouchRippleAtMs = now
+                        addRipple(event.x, event.y, touch = true)
+                    }
+                }
+            }
+        }
+
+        override fun onDetachedFromWindow() {
+            scanning = false
+            ripples.clear()
+            super.onDetachedFromWindow()
+        }
+
+        override fun onWindowVisibilityChanged(visibility: Int) {
+            super.onWindowVisibilityChanged(visibility)
+            if (visibility == VISIBLE && scanning) {
+                postInvalidateOnAnimation()
+            }
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val now = System.currentTimeMillis()
-            specs.forEachIndexed { index, spec ->
-                val age = now - spec.startedAtMs
-                val phase = age.toFloat() / spec.durationMs.toFloat()
-                if (phase >= 1f) {
-                    specs[index] = randomSleepSpec(now)
-                    return@forEachIndexed
-                }
+            if (!scanning || windowVisibility != VISIBLE || width <= 0 || height <= 0) return
 
-                val alpha = (255 * (1f - phase)).toInt().coerceIn(0, 255)
-                val size = dp(spec.size).toFloat()
-                val x = width * (spec.x + spec.driftX * phase)
-                val y = height * (spec.y + spec.driftY * phase)
-                paint.alpha = alpha
-                paint.textSize = size
-                canvas.drawText("z", x, y, paint)
-            }
-            paint.alpha = 255
+            val now = SystemClock.uptimeMillis()
+            val seconds = (now - scanStartedAtMs) / 1000f
+            val activity = 0.65f + intensity * 0.35f
+
+            drawStaticNoise(canvas, seconds, activity)
+            drawSpectrumBars(canvas, seconds, activity)
+            drawSineWaves(canvas, seconds, activity)
+            drawSweep(canvas, seconds)
+            drawRipples(canvas, now)
+
+            maybeAddAmbientRipple(now)
+            postInvalidateOnAnimation()
         }
 
-        private fun randomSleepSpec(startedAtMs: Long = System.currentTimeMillis()): SleepSpec {
-            val angle = randomSleepAngle()
-            val radius = random.nextFloatIn(0.36f, 0.44f)
-            val x = 0.5f + kotlin.math.cos(angle) * radius
-            val y = 0.5f + kotlin.math.sin(angle) * radius
-            val outwardX = kotlin.math.cos(angle) * random.nextFloatIn(0.03f, 0.08f)
-            val upwardBias = -random.nextFloatIn(0.03f, 0.09f)
-            return SleepSpec(
-                x = x.coerceIn(0.08f, 0.92f),
-                y = y.coerceIn(0.08f, 0.92f),
-                driftX = outwardX,
-                driftY = upwardBias + kotlin.math.sin(angle) * random.nextFloatIn(0.01f, 0.04f),
-                size = random.nextInt(19, 27),
-                durationMs = random.nextLong(1_700L, 2_900L),
-                startedAtMs = startedAtMs - random.nextLong(0L, 1_300L),
+        private fun beginScanSession() {
+            scanStartedAtMs = SystemClock.uptimeMillis()
+            lastTouchRippleAtMs = 0L
+            random = Random(System.nanoTime() xor sampleCount.toLong() xor width.toLong() shl 16)
+            waves = newWaveSpecs()
+            spectrumBars = newSpectrumBars()
+            staticFlecks = newStaticFlecks()
+            ripples.clear()
+            addRipple(width * random.nextFloatIn(0.18f, 0.82f), height * random.nextFloatIn(0.18f, 0.72f), touch = false)
+        }
+
+        private fun drawSineWaves(canvas: Canvas, seconds: Float, activity: Float) {
+            waves.forEachIndexed { index, wave ->
+                wavePath.reset()
+                val centerY = height * wave.y
+                val amplitude = height * wave.amplitude * (0.82f + activity * 0.22f)
+                val step = maxOf(8f, width / 72f)
+                var x = -step
+                while (x <= width + step) {
+                    val normalizedX = x / width.coerceAtLeast(1).toFloat()
+                    val phase = normalizedX * wave.frequency + seconds * wave.speed + wave.phase
+                    val y = centerY + kotlin.math.sin(phase * Math.PI.toFloat() * 2f) * amplitude
+                    if (x <= -step) {
+                        wavePath.moveTo(x, y)
+                    } else {
+                        wavePath.lineTo(x, y)
+                    }
+                    x += step
+                }
+                linePaint.strokeWidth = dp(if (index == 0) 2 else 1).toFloat()
+                linePaint.alpha = (SCANNER_RF_WAVE_ALPHA * wave.alpha * activity).toInt().coerceIn(0, 255)
+                canvas.drawPath(wavePath, linePaint)
+            }
+            linePaint.alpha = 255
+        }
+
+        private fun drawSpectrumBars(canvas: Canvas, seconds: Float, activity: Float) {
+            val baseY = height + dp(1).toFloat()
+            val maxBarHeight = height * 0.24f
+            val barWidth = maxOf(dp(2).toFloat(), width / 108f)
+            val analyzerTick = kotlin.math.floor(seconds * 22f).toInt()
+            val clusterTick = kotlin.math.floor(seconds * 1.35f).toInt()
+            val clusters = spectrumClusters(clusterTick)
+            spectrumBars.forEachIndexed { index, bar ->
+                val x = width * bar.x
+                val fastSample = hashStaticTick(analyzerTick * 97 + index * 53)
+                val localNoise = hashStaticTick(analyzerTick * 29 + index * 191 + sampleCount * 7)
+                var groupedEnergy = 0f
+                clusters.forEach { cluster ->
+                    val distance = kotlin.math.abs(bar.x - cluster.center)
+                    val wrappedDistance = minOf(distance, 1f - distance)
+                    val falloff = (1f - wrappedDistance / cluster.width).coerceIn(0f, 1f)
+                    groupedEnergy += falloff * falloff * cluster.strength
+                }
+                val needle = if (groupedEnergy > 0.12f && fastSample > 0.72f) fastSample * 0.22f else 0f
+                val noiseFloor = bar.base * (0.42f + localNoise * 0.28f)
+                val heightFactor = (noiseFloor + groupedEnergy * (0.68f + fastSample * 0.28f) + needle).coerceIn(0.04f, 1f)
+                val barHeight = maxBarHeight * heightFactor * (0.72f + activity * 0.28f)
+                fillPaint.alpha = (SCANNER_RF_BAR_ALPHA * bar.alpha * activity).toInt().coerceIn(0, 255)
+                canvas.drawRoundRect(
+                    x,
+                    baseY - barHeight,
+                    x + barWidth,
+                    baseY,
+                    barWidth / 2f,
+                    barWidth / 2f,
+                    fillPaint,
+                )
+            }
+            fillPaint.alpha = 255
+        }
+
+        private fun spectrumClusters(tick: Int): List<RfSpectrumCluster> =
+            List(3) { index ->
+                val centerSample = hashStaticTick(tick * 83 + index * 197)
+                val jumpSample = hashStaticTick(tick * 47 + index * 67)
+                val center = ((centerSample * 0.86f + jumpSample * 0.14f) % 1f).coerceIn(0f, 1f)
+                RfSpectrumCluster(
+                    center = center,
+                    width = 0.045f + hashStaticTick(tick * 29 + index * 113) * 0.085f,
+                    strength = 0.42f + hashStaticTick(tick * 131 + index * 31) * 0.58f,
+                )
+            }
+
+        private fun drawStaticNoise(canvas: Canvas, seconds: Float, activity: Float) {
+            val tick = kotlin.math.floor(seconds * 18f).toInt()
+            staticFlecks.forEachIndexed { index, fleck ->
+                val flash = hashStaticTick(tick + index * 31)
+                if (flash < fleck.threshold) return@forEachIndexed
+
+                val shimmer = hashStaticTick(tick * 3 + index * 47)
+                val x = width * ((fleck.x + shimmer * 0.018f) % 1f)
+                val y = height * fleck.y
+                fillPaint.alpha = (SCANNER_RF_STATIC_ALPHA * fleck.alpha * activity * flash).toInt().coerceIn(0, 255)
+                if (fleck.isDash) {
+                    val dashWidth = dp(3).toFloat() + dp(10).toFloat() * shimmer
+                    canvas.drawRoundRect(
+                        x,
+                        y,
+                        x + dashWidth,
+                        y + fleck.size,
+                        fleck.size / 2f,
+                        fleck.size / 2f,
+                        fillPaint,
+                    )
+                } else {
+                    canvas.drawCircle(x, y, fleck.size, fillPaint)
+                }
+            }
+            fillPaint.alpha = 255
+        }
+
+        private fun drawSweep(canvas: Canvas, seconds: Float) {
+            val sweepAge = seconds % 7.5f
+            if (sweepAge > 2.2f) return
+
+            val progress = sweepAge / 2.2f
+            val x = width * progress
+            linePaint.strokeWidth = dp(1).toFloat()
+            linePaint.alpha = (38 * (1f - progress)).toInt().coerceIn(0, 38)
+            canvas.drawLine(x, height * 0.12f, x, height * 0.88f, linePaint)
+            linePaint.alpha = (22 * (1f - progress)).toInt().coerceIn(0, 22)
+            canvas.drawLine(x + dp(18), height * 0.2f, x + dp(18), height * 0.74f, linePaint)
+            linePaint.alpha = 255
+        }
+
+        private fun drawRipples(canvas: Canvas, now: Long) {
+            val iterator = ripples.iterator()
+            while (iterator.hasNext()) {
+                val ripple = iterator.next()
+                val age = now - ripple.startedAtMs
+                val progress = age.toFloat() / ripple.durationMs.toFloat()
+                if (progress >= 1f) {
+                    iterator.remove()
+                    continue
+                }
+
+                val eased = 1f - (1f - progress) * (1f - progress)
+                val radius = ripple.radius * eased
+                linePaint.strokeWidth = ripple.strokeWidth
+                linePaint.alpha = (ripple.alpha * (1f - progress)).toInt().coerceIn(0, 255)
+                canvas.drawCircle(ripple.x, ripple.y, radius, linePaint)
+                if (ripple.hasEcho) {
+                    linePaint.alpha = (ripple.alpha * 0.42f * (1f - progress)).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(ripple.x, ripple.y, radius * 0.62f, linePaint)
+                }
+            }
+            linePaint.alpha = 255
+        }
+
+        private fun maybeAddAmbientRipple(now: Long) {
+            if (ripples.size > 5) return
+            val elapsed = now - scanStartedAtMs
+            if (elapsed < 900L) return
+            val cadence = 1_050L + (1f - intensity) * 900L
+            if (random.nextFloat() > 16f / cadence) return
+            addRipple(
+                x = width * random.nextFloatIn(0.08f, 0.92f),
+                y = height * random.nextFloatIn(0.12f, 0.86f),
+                touch = false,
             )
         }
 
-        private fun randomSleepAngle(): Float =
-            if (random.nextBoolean()) {
-                random.nextFloatIn(0f, (Math.PI * 7f / 6f).toFloat())
-            } else {
-                random.nextFloatIn((Math.PI * 11f / 6f).toFloat(), (Math.PI * 2f).toFloat())
+        private fun addRipple(x: Float, y: Float, touch: Boolean) {
+            val startedAt = SystemClock.uptimeMillis()
+            val maxRadius = maxOf(width, height) * if (touch) 0.34f else random.nextFloatIn(0.18f, 0.32f)
+            ripples.add(RfRipple(
+                x = x,
+                y = y,
+                radius = maxRadius,
+                durationMs = if (touch) 1_150L else random.nextLong(1_650L, 2_700L),
+                alpha = if (touch) 72 else random.nextInt(22, 45),
+                strokeWidth = dp(if (touch) 2 else 1).toFloat(),
+                hasEcho = touch || random.nextFloat() > 0.42f,
+                startedAtMs = startedAt,
+            ))
+            postInvalidateOnAnimation()
+        }
+
+        private fun newWaveSpecs(): List<RfWaveSpec> =
+            List(3) { index ->
+                RfWaveSpec(
+                    y = random.nextFloatIn(0.16f + index * 0.17f, 0.26f + index * 0.2f).coerceIn(0.12f, 0.78f),
+                    amplitude = random.nextFloatIn(0.012f, 0.032f),
+                    frequency = random.nextFloatIn(1.4f, 3.6f),
+                    speed = random.nextFloatIn(0.025f, 0.085f) * if (random.nextBoolean()) 1f else -1f,
+                    phase = random.nextFloatIn(0f, 1f),
+                    alpha = random.nextFloatIn(0.62f, 1f),
+                )
             }
+
+        private fun newSpectrumBars(): List<RfBarSpec> =
+            List(44) { index ->
+                RfBarSpec(
+                    x = index / 43f,
+                    base = random.nextFloatIn(0.08f, 0.42f),
+                    jitter = random.nextFloatIn(0.5f, 1f),
+                    speed = 0f,
+                    phase = random.nextFloatIn(0f, 1f),
+                    alpha = random.nextFloatIn(0.5f, 1f),
+                )
+            }
+
+        private fun newStaticFlecks(): List<RfStaticFleck> =
+            List(96) {
+                RfStaticFleck(
+                    x = random.nextFloatIn(0f, 1f),
+                    y = random.nextFloatIn(0.58f, 0.98f),
+                    size = random.nextFloatIn(0.6f, 1.7f) * resources.displayMetrics.density,
+                    threshold = random.nextFloatIn(0.42f, 0.86f),
+                    alpha = random.nextFloatIn(0.36f, 1f),
+                    isDash = random.nextFloat() > 0.72f,
+                )
+            }
+
+        private fun hashStaticTick(value: Int): Float {
+            var hash = value * 1103515245 + 12345
+            hash = hash xor (hash ushr 16)
+            return (hash and 0x7fffffff).toFloat() / Int.MAX_VALUE.toFloat()
+        }
     }
 
     private data class SleepSpec(
@@ -1268,14 +1506,63 @@ class MainActivity : Activity() {
         val startedAtMs: Long,
     )
 
+    private data class RfWaveSpec(
+        val y: Float,
+        val amplitude: Float,
+        val frequency: Float,
+        val speed: Float,
+        val phase: Float,
+        val alpha: Float,
+    )
+
+    private data class RfBarSpec(
+        val x: Float,
+        val base: Float,
+        val jitter: Float,
+        val speed: Float,
+        val phase: Float,
+        val alpha: Float,
+    )
+
+    private data class RfStaticFleck(
+        val x: Float,
+        val y: Float,
+        val size: Float,
+        val threshold: Float,
+        val alpha: Float,
+        val isDash: Boolean,
+    )
+
+    private data class RfSpectrumCluster(
+        val center: Float,
+        val width: Float,
+        val strength: Float,
+    )
+
+    private data class RfRipple(
+        val x: Float,
+        val y: Float,
+        val radius: Float,
+        val durationMs: Long,
+        val alpha: Int,
+        val strokeWidth: Float,
+        val hasEcho: Boolean,
+        val startedAtMs: Long,
+    )
+
     private inner class TelemetryBarsView : View(this@MainActivity) {
         private var metrics: List<MetricQuality> = emptyList()
         private var showNoData = false
+        private var noDataAlpha = 0f
+        private var barsAlpha = 1f
         private var animatedQualities: List<Float> = emptyList()
         private var previousSampleQualities: List<Float> = emptyList()
         private var animatedPreviousQualities: List<Float> = emptyList()
         private var hasComparisonSample = false
         private var barAnimator: ValueAnimator? = null
+        private var visibilityAnimator: ValueAnimator? = null
+        private val sleepRandom = Random(System.nanoTime())
+        private val sleepSpecs = MutableList(6) { randomTelemetrySleepSpec() }
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = SCANNER_BAR_TRACK
             style = Paint.Style.FILL
@@ -1314,6 +1601,10 @@ class MainActivity : Activity() {
             textAlign = Paint.Align.CENTER
             textSize = dp(16).toFloat()
         }
+        private val sleepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textAlign = Paint.Align.CENTER
+        }
         private val barBounds = RectF()
         private val barClipPath = Path()
         private val gnssPanelPath = Path()
@@ -1326,7 +1617,7 @@ class MainActivity : Activity() {
         fun setMetrics(metrics: List<MetricQuality>, animate: Boolean) {
             val previousMetrics = this.metrics
             val previousQualities = animatedQualities.ifEmpty { previousMetrics.map { it.quality } }
-            showNoData = false
+            setNoDataVisible(false, animate)
             this.metrics = metrics
             contentDescription = metrics.joinToString(separator = ", ") {
                 "${it.label} ${it.valueText}"
@@ -1372,7 +1663,7 @@ class MainActivity : Activity() {
 
         fun showNoData() {
             barAnimator?.cancel()
-            showNoData = true
+            setNoDataVisible(true, animate = true)
             metrics = emptyList()
             animatedQualities = emptyList()
             previousSampleQualities = emptyList()
@@ -1384,12 +1675,17 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (showNoData) {
+            if (showNoData || noDataAlpha > 0f) {
                 val centerY = height / 2f - (emptyPaint.descent() + emptyPaint.ascent()) / 2f
+                emptyPaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
                 canvas.drawText(getString(R.string.no_data), width / 2f, centerY, emptyPaint)
-                return
+                emptyPaint.alpha = SCANNER_SOFT_TEXT_ALPHA
+                drawTelemetrySleep(canvas)
+                if (showNoData) {
+                    postInvalidateOnAnimation()
+                }
             }
-            if (metrics.isEmpty()) return
+            if (metrics.isEmpty() || barsAlpha <= 0f) return
 
             val top = dp(22).toFloat()
             val bottom = height - dp(70).toFloat()
@@ -1400,7 +1696,9 @@ class MainActivity : Activity() {
             if (hasGnss) {
                 val dividerX = segmentWidth * 3f
                 drawRightRoundedPanel(canvas, dividerX)
+                dividerPaint.alpha = (SCANNER_GNSS_DIVIDER_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_GNSS_DIVIDER_ALPHA)
                 canvas.drawLine(dividerX, dp(14).toFloat(), dividerX, height - dp(14).toFloat(), dividerPaint)
+                dividerPaint.alpha = SCANNER_GNSS_DIVIDER_ALPHA
             }
 
             metrics.forEachIndexed { index, metric ->
@@ -1409,15 +1707,18 @@ class MainActivity : Activity() {
                 val right = centerX + barWidth / 2f
 
                 barBounds.set(left, top, right, bottom)
+                trackPaint.alpha = (SCANNER_BAR_TRACK_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_BAR_TRACK_ALPHA)
                 canvas.drawRoundRect(barBounds, dp(14).toFloat(), dp(14).toFloat(), trackPaint)
 
                 val animatedQuality = animatedQualities.getOrElse(index) { metric.quality }
                 val fillTop = bottom - availableHeight * animatedQuality
                 fillPaint.color = qualityColor(animatedQuality)
+                fillPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
                 drawMaskedBarFill(canvas, left, top, right, bottom, fillTop)
 
                 animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
                     val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
+                    previousPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
                     canvas.drawLine(left - dp(3), markerY, right + dp(3), markerY, previousPaint)
                     drawPreviousMarkerArrow(
                         canvas = canvas,
@@ -1426,11 +1727,81 @@ class MainActivity : Activity() {
                         previousQuality = previousQuality,
                         currentQuality = metric.quality,
                     )
+                    previousPaint.alpha = 255
                 }
 
+                labelPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
+                valuePaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
                 canvas.drawText(metric.label, centerX, height - dp(40).toFloat(), labelPaint)
                 canvas.drawText(metric.valueText, centerX, height - dp(18).toFloat(), valuePaint)
+                labelPaint.alpha = 255
+                valuePaint.alpha = SCANNER_SOFT_TEXT_ALPHA
             }
+            trackPaint.alpha = SCANNER_BAR_TRACK_ALPHA
+            fillPaint.alpha = 255
+        }
+
+        private fun setNoDataVisible(visible: Boolean, animate: Boolean) {
+            if (showNoData == visible && noDataAlpha == if (visible) 1f else 0f) return
+            showNoData = visible
+            visibilityAnimator?.cancel()
+
+            val targetNoDataAlpha = if (visible) 1f else 0f
+            val targetBarsAlpha = if (visible) 0f else 1f
+            if (!animate) {
+                noDataAlpha = targetNoDataAlpha
+                barsAlpha = targetBarsAlpha
+                invalidate()
+                return
+            }
+
+            val startNoDataAlpha = noDataAlpha
+            val startBarsAlpha = barsAlpha
+            visibilityAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 460L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    val progress = animator.animatedValue as Float
+                    noDataAlpha = startNoDataAlpha + (targetNoDataAlpha - startNoDataAlpha) * progress
+                    barsAlpha = startBarsAlpha + (targetBarsAlpha - startBarsAlpha) * progress
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        private fun drawTelemetrySleep(canvas: Canvas) {
+            val now = System.currentTimeMillis()
+            sleepSpecs.forEachIndexed { index, spec ->
+                val age = now - spec.startedAtMs
+                val phase = age.toFloat() / spec.durationMs.toFloat()
+                if (phase >= 1f) {
+                    sleepSpecs[index] = randomTelemetrySleepSpec(now)
+                    return@forEachIndexed
+                }
+
+                val fade = kotlin.math.sin(phase * Math.PI.toFloat()).coerceIn(0f, 1f)
+                sleepPaint.alpha = (120 * noDataAlpha * fade).toInt().coerceIn(0, 120)
+                sleepPaint.textSize = spec.size.toFloat()
+                val x = width * (spec.x + spec.driftX * phase)
+                val y = height * (spec.y + spec.driftY * phase)
+                canvas.drawText("z", x, y, sleepPaint)
+            }
+            sleepPaint.alpha = 255
+        }
+
+        private fun randomTelemetrySleepSpec(startedAtMs: Long = System.currentTimeMillis()): SleepSpec {
+            val x = sleepRandom.nextFloatIn(0.08f, 0.92f)
+            val y = sleepRandom.nextFloatIn(0.18f, 0.86f)
+            return SleepSpec(
+                x = x,
+                y = y,
+                driftX = sleepRandom.nextFloatIn(-0.035f, 0.035f),
+                driftY = -sleepRandom.nextFloatIn(0.04f, 0.11f),
+                size = sleepRandom.nextFloatIn(dp(18).toFloat(), dp(26).toFloat()).toInt(),
+                durationMs = sleepRandom.nextLong(1_900L, 3_100L),
+                startedAtMs = startedAtMs - sleepRandom.nextLong(0L, 1_200L),
+            )
         }
 
         private fun drawRightRoundedPanel(canvas: Canvas, left: Float) {
@@ -1446,7 +1817,9 @@ class MainActivity : Activity() {
             gnssPanelPath.quadTo(right, bottom, right - radius, bottom)
             gnssPanelPath.lineTo(left, bottom)
             gnssPanelPath.close()
+            gnssPanelPaint.alpha = (SCANNER_GNSS_PANEL_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_GNSS_PANEL_ALPHA)
             canvas.drawPath(gnssPanelPath, gnssPanelPaint)
+            gnssPanelPaint.alpha = SCANNER_GNSS_PANEL_ALPHA
         }
 
         private fun drawMaskedBarFill(
@@ -1716,11 +2089,18 @@ class MainActivity : Activity() {
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
         val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)
         val SCANNER_SOFT_TEXT: Int = Color.argb(204, 255, 255, 255)
+        const val SCANNER_SOFT_TEXT_ALPHA: Int = 204
         val SCANNER_BUTTON_RIPPLE: Int = Color.argb(31, 15, 118, 110)
         val SCANNER_RING: Int = Color.argb(178, 255, 255, 255)
+        const val SCANNER_RF_WAVE_ALPHA: Int = 56
+        const val SCANNER_RF_BAR_ALPHA: Int = 42
+        const val SCANNER_RF_STATIC_ALPHA: Int = 62
         val SCANNER_BAR_TRACK: Int = Color.argb(38, 255, 255, 255)
+        const val SCANNER_BAR_TRACK_ALPHA: Int = 38
         val SCANNER_GNSS_PANEL: Int = Color.argb(34, 0, 0, 0)
+        const val SCANNER_GNSS_PANEL_ALPHA: Int = 34
         val SCANNER_GNSS_DIVIDER: Int = Color.argb(138, 255, 255, 255)
+        const val SCANNER_GNSS_DIVIDER_ALPHA: Int = 138
         val SCANNER_QUALITY_LOW: Int = Color.rgb(248, 113, 113)
         val SCANNER_QUALITY_MEDIUM: Int = Color.rgb(250, 204, 21)
         val SCANNER_QUALITY_HIGH: Int = Color.rgb(134, 239, 172)
