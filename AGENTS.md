@@ -85,11 +85,15 @@ Before making a commit, update `AGENTS.md` and `README.md` when the change affec
 
 When adding Android code, keep modules separated roughly as:
 
+- `assets/icon/` for the canonical app icon SVG and generated favicon assets
 - `app/` for UI and app wiring
 - `core/` for domain models and JSONL encoding
 - `telemetry/` for Android connectivity/location collectors
 - `storage/` for log persistence/export
 - `docs/` for schema and architecture notes
 - `samples/` for copied or minimized example logs
+- `scripts/` for maintenance scripts such as icon generation
+
+App icons are generated from `assets/icon/source.svg`. Run `npm run icons` after changing that source to refresh Android launcher PNGs and generated favicon files.
 
 Do not commit large generated datasets unless they are intentionally curated fixtures.

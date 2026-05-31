@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Ask app icon</title>
+  <desc id="desc">A three-out-of-four mobile signal data symbol.</desc>
+  <g id="background">
+    <rect width="1024" height="1024" rx="224" fill="#0F766E"/>
+  </g>
+  <g id="mark" fill="#FFFFFF">
+    <rect x="192" y="704" width="128" height="192" rx="32"/>
+    <rect x="384" y="576" width="128" height="320" rx="32"/>
+    <rect x="576" y="448" width="128" height="448" rx="32"/>
+    <rect x="768" y="320" width="128" height="576" rx="32" opacity="0.28"/>
+  </g>
+</svg>

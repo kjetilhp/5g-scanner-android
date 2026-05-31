@@ -36,10 +36,12 @@ external/node-scanner/data/*.jsonl
 
 ```text
 5g-scanner-android/
+  assets/icon/          Canonical app icon SVG and generated favicon assets
   app/                  Android application module
   core/                 Plain Kotlin domain models and JSONL encoding
   telemetry/            Android location/connectivity/cellular collectors
   storage/              Log persistence and export
+  scripts/              Maintenance scripts, including icon generation
   docs/                 Architecture notes and output contract
   external/
     node-scanner/       Reference Node/TypeScript scanner submodule
@@ -71,6 +73,23 @@ The emulator build currently uses mock telemetry. It supports:
 - Separate settings screen for sampling frequency and GNSS mode
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
+
+## Icon Workflow
+
+The app icon and favicon files are generated from a single square SVG source:
+
+```text
+assets/icon/source.svg
+```
+
+It uses a `1024x1024` canvas with grid-aligned geometry so small launcher and favicon outputs stay crisp. Install the small dev toolchain once, then regenerate icons with:
+
+```text
+npm install
+npm run icons
+```
+
+The script uses the pinned `@resvg/resvg-js` dev dependency for deterministic SVG rasterization. Generated Android assets are written to `app/src/main/res/mipmap-*`; generated favicon assets are written to `assets/icon/generated/`.
 
 ## Output Format
 
