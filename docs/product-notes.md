@@ -44,12 +44,13 @@ The user should never need to understand radio engineering details to know wheth
 
 Settings should favor a small number of understandable controls:
 
-- Sampling frequency
 - Pause/resume scanning
 - Pause scanning until a date/time
 - Location/GNSS behavior
 - Consent and permission management
 - Local data deletion/export later
+
+Sampling frequency should not be user-configurable until changing it would reliably change real collection behavior across supported phones. The prototype should use a fixed internal cadence.
 
 ## Scanner State
 

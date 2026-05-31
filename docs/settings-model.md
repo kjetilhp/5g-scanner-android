@@ -33,18 +33,11 @@ Examples:
 - Manual pause: disabled until the user resumes
 - Pause until: disabled until a chosen date/time
 
-### Sampling Frequency
+### Sampling Cadence
 
-Start with presets:
+Sampling cadence is fixed internally in the prototype and should not be shown as a user setting. Android may not deliver fresh telephony or location data exactly at a requested interval, so samples must always include actual timestamps.
 
-```text
-Low impact: 60 seconds
-Balanced: 15 seconds
-High detail: 5 seconds
-Debug: 1 second
-```
-
-The stored value can be milliseconds, but the UI should use human labels. Android may not deliver fresh telephony or location data exactly at the selected interval, so samples must always include actual timestamps.
+Add cadence controls later only if changing them reliably changes collection behavior on supported phones and the tradeoff can be explained clearly.
 
 ### GNSS / Location Mode
 

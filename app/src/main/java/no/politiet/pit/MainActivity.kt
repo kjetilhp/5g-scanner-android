@@ -2,6 +2,7 @@ package no.politiet.pit
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.animation.AnimatorSet
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Canvas
@@ -52,16 +53,16 @@ class MainActivity : Activity() {
     private var selectedLogFile: CoverageLogStore.LogFile? = null
     private var sampleCount = 0
     private var lastSampleAt: Instant? = null
-    private var frequency = SamplingFrequency.Balanced
     private var gnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
     private var lastReportedAt: Instant? = null
 
-    private var statusText: TextView? = null
     private var telemetryBars: TelemetryBarsView? = null
     private var titleSignalIcon: SignalQualityIconView? = null
     private var rfSignalBackground: RfSignalBackgroundView? = null
     private var stopStartButton: ImageButton? = null
+    private var startButtonPulseAnimator: AnimatorSet? = null
+    private var startButtonPulseScheduled = false
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
@@ -73,10 +74,36 @@ class MainActivity : Activity() {
             samplerScheduled = false
             if (canSample()) {
                 captureMockSample()
-                scheduleNextSample(frequency.intervalMs)
+                scheduleNextSample(SAMPLE_INTERVAL_MS)
             } else {
                 render()
             }
+        }
+    }
+
+    private val startButtonPulse = object : Runnable {
+        override fun run() {
+            startButtonPulseScheduled = false
+            val button = stopStartButton
+            if (button == null || !isStopped() || showingSettings) {
+                stopStartButtonPulse()
+                return
+            }
+
+            startButtonPulseAnimator?.cancel()
+            button.pivotX = button.width / 2f
+            button.pivotY = button.height / 2f
+            startButtonPulseAnimator = AnimatorSet().apply {
+                duration = 860L
+                interpolator = DecelerateInterpolator()
+                playTogether(
+                    ObjectAnimator.ofFloat(button, View.SCALE_X, 1f, 1.055f, 1f),
+                    ObjectAnimator.ofFloat(button, View.SCALE_Y, 1f, 1.055f, 1f),
+                    ObjectAnimator.ofFloat(button, "elevation", dp(8).toFloat(), dp(14).toFloat(), dp(8).toFloat()),
+                )
+                start()
+            }
+            scheduleStartButtonPulse()
         }
     }
 
@@ -90,7 +117,10 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(sampler)
+        handler.removeCallbacks(startButtonPulse)
         samplerScheduled = false
+        startButtonPulseScheduled = false
+        startButtonPulseAnimator?.cancel()
         scannerActivityRingAnimator?.cancel()
         super.onDestroy()
     }
@@ -212,7 +242,6 @@ class MainActivity : Activity() {
             }
         }
 
-        statusText = scannerStatusText()
         scannerActivityRing = ScannerActivityRing()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
@@ -233,15 +262,6 @@ class MainActivity : Activity() {
                 false
             }
             val controlBottomMargin = navigationBarHeight() + dp(160)
-            addView(statusText, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-            ).apply {
-                leftMargin = dp(28)
-                rightMargin = dp(28)
-                bottomMargin = controlBottomMargin + dp(136)
-            })
             addView(scannerActivityRing, FrameLayout.LayoutParams(dp(144), dp(144), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin - dp(16)
             })
@@ -263,17 +283,6 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), dp(32))
         }
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_scanning)))
-        content.addView(settingsGroup(
-            settingsPreferenceRow(
-                title = getString(R.string.setting_sampling_frequency_title),
-                summary = frequency.summary,
-                value = frequency.label,
-            ) {
-                showSamplingFrequencyDialog()
-            },
-        ))
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_location)))
         content.addView(settingsGroup(
@@ -475,11 +484,11 @@ class MainActivity : Activity() {
     }
 
     private fun clearScannerViews() {
-        statusText = null
         telemetryBars = null
         titleSignalIcon = null
         rfSignalBackground?.setScanning(false)
         rfSignalBackground = null
+        stopStartButtonPulse()
         stopStartButton = null
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
@@ -601,9 +610,6 @@ class MainActivity : Activity() {
     }
 
     private fun updateScannerUi() {
-        val effectiveStatus = currentScannerStatus()
-
-        statusText?.text = effectiveStatus
         titleSignalIcon?.setQuality(
             quality = if (canSample()) latestTelemetry.overallQuality() else 0f,
             animate = sampleCount > 0,
@@ -621,13 +627,33 @@ class MainActivity : Activity() {
                 contentDescription = getString(R.string.stop_scanning)
             }
         }
+        updateStartButtonPulse()
         updateScannerActivityRing(canSample())
     }
 
-    private fun currentScannerStatus(): String {
-        return when {
-            stoppedManually -> getString(R.string.status_stopped_manual)
-            else -> getString(R.string.status_scanning)
+    private fun updateStartButtonPulse() {
+        if (isStopped() && stopStartButton != null && !showingSettings) {
+            scheduleStartButtonPulse()
+        } else {
+            stopStartButtonPulse()
+        }
+    }
+
+    private fun scheduleStartButtonPulse() {
+        if (startButtonPulseScheduled) return
+        startButtonPulseScheduled = true
+        handler.postDelayed(startButtonPulse, Random.nextLong(2_800L, 5_800L))
+    }
+
+    private fun stopStartButtonPulse() {
+        handler.removeCallbacks(startButtonPulse)
+        startButtonPulseScheduled = false
+        startButtonPulseAnimator?.cancel()
+        startButtonPulseAnimator = null
+        stopStartButton?.apply {
+            scaleX = 1f
+            scaleY = 1f
+            elevation = dp(8).toFloat()
         }
     }
 
@@ -670,9 +696,6 @@ class MainActivity : Activity() {
             legacyPreferences.getBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, false),
         )
         stoppedManually = preferences.getBoolean(KEY_SCANNER_STOPPED, false)
-        frequency = SamplingFrequency.fromName(
-            preferences.getString(KEY_FREQUENCY, SamplingFrequency.Balanced.name),
-        )
         gnssMode = GnssMode.fromName(
             preferences.getString(KEY_GNSS_MODE, GnssMode.Balanced.name),
         )
@@ -686,7 +709,6 @@ class MainActivity : Activity() {
         ReportingScheduler.appPreferences(this).edit()
             .putBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, consentGranted)
             .putBoolean(KEY_SCANNER_STOPPED, stoppedManually)
-            .putString(KEY_FREQUENCY, frequency.name)
             .putString(KEY_GNSS_MODE, gnssMode.name)
             .putString(ReportingScheduler.KEY_REPORTING_MODE, reportingMode.name)
             .apply()
@@ -780,13 +802,6 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
         }
-
-    private fun scannerStatusText(): TextView = TextView(this).apply {
-        textSize = 18f
-        setTextColor(SCANNER_SOFT_TEXT)
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-    }
 
     private fun scannerSection(text: String): TextView = TextView(this).apply {
         this.text = text.uppercase()
@@ -1078,21 +1093,6 @@ class MainActivity : Activity() {
                 marginStart = dp(16)
             }
         }
-
-    private fun showSamplingFrequencyDialog() {
-        val labels = SamplingFrequency.entries.map { it.label }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.setting_sampling_frequency_title))
-            .setSingleChoiceItems(labels, SamplingFrequency.entries.indexOf(frequency)) { dialog, which ->
-                frequency = SamplingFrequency.entries[which]
-                saveState()
-                ensureSamplerState()
-                dialog.dismiss()
-                render()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
 
     private fun showGnssModeDialog() {
         val labels = GnssMode.entries.map { it.label }.toTypedArray()
@@ -1791,17 +1791,31 @@ class MainActivity : Activity() {
         }
 
         private fun randomTelemetrySleepSpec(startedAtMs: Long = System.currentTimeMillis()): SleepSpec {
-            val x = sleepRandom.nextFloatIn(0.08f, 0.92f)
-            val y = sleepRandom.nextFloatIn(0.18f, 0.86f)
+            val position = randomTelemetrySleepPosition()
             return SleepSpec(
-                x = x,
-                y = y,
+                x = position.first,
+                y = position.second,
                 driftX = sleepRandom.nextFloatIn(-0.035f, 0.035f),
                 driftY = -sleepRandom.nextFloatIn(0.04f, 0.11f),
                 size = sleepRandom.nextFloatIn(dp(18).toFloat(), dp(26).toFloat()).toInt(),
                 durationMs = sleepRandom.nextLong(1_900L, 3_100L),
                 startedAtMs = startedAtMs - sleepRandom.nextLong(0L, 1_200L),
             )
+        }
+
+        private fun randomTelemetrySleepPosition(): Pair<Float, Float> {
+            repeat(12) {
+                val x = sleepRandom.nextFloatIn(0.08f, 0.92f)
+                val y = sleepRandom.nextFloatIn(0.18f, 0.86f)
+                val insideNoDataBand = x in 0.26f..0.74f && y in 0.42f..0.62f
+                if (!insideNoDataBand) return x to y
+            }
+
+            return if (sleepRandom.nextBoolean()) {
+                sleepRandom.nextFloatIn(0.08f, 0.92f) to sleepRandom.nextFloatIn(0.18f, 0.36f)
+            } else {
+                sleepRandom.nextFloatIn(0.08f, 0.92f) to sleepRandom.nextFloatIn(0.68f, 0.86f)
+            }
         }
 
         private fun drawRightRoundedPanel(canvas: Canvas, left: Float) {
@@ -2031,27 +2045,6 @@ class MainActivity : Activity() {
     private fun Random.nextFloatIn(start: Float, end: Float): Float =
         start + nextFloat() * (end - start)
 
-    private enum class SamplingFrequency(val label: String, val intervalMs: Long) {
-        LowImpact("Low impact", 60_000),
-        Balanced("Balanced", 15_000),
-        HighDetail("High detail", 5_000),
-        Debug("Debug", 1_000);
-
-        val summary: String
-            get() = when (this) {
-                LowImpact -> "Every 60 seconds"
-                Balanced -> "Every 15 seconds"
-                HighDetail -> "Every 5 seconds"
-                Debug -> "Every second"
-            }
-
-        companion object {
-            fun fromName(value: String?): SamplingFrequency =
-                entries.firstOrNull { it.name == value } ?: Balanced
-        }
-
-    }
-
     private enum class GnssMode(val label: String, val summary: String) {
         Balanced("Balanced", "Use location with moderate power impact"),
         HighAccuracy("High accuracy", "Prefer the most precise available location");
@@ -2083,8 +2076,8 @@ class MainActivity : Activity() {
     private companion object {
         const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
+        const val SAMPLE_INTERVAL_MS = 15_000L
         const val KEY_SCANNER_STOPPED = "scannerStopped"
-        const val KEY_FREQUENCY = "frequency"
         const val KEY_GNSS_MODE = "gnssMode"
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
         val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)

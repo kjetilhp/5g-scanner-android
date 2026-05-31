@@ -71,7 +71,7 @@ The emulator build currently uses mock telemetry. It supports:
 - Daily JSONL log files written under `Documents/Ask/` on shared storage
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
-- Separate settings screen for sampling frequency and GNSS mode
+- Separate settings screen for GNSS mode, reporting, logs, and privacy details
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
@@ -126,7 +126,8 @@ Core first-version assumptions:
 - Scanning requires app-level consent and Android permission grants
 - Participation can stop by stopping scanning or uninstalling the app
 - The main UI should expose a clear scanning on/off control
-- Settings should include sampling frequency, stop/start controls, and location/GNSS behavior
+- The prototype samples on a fixed internal cadence; settings should avoid scanner controls that do not change real collection behavior
+- Settings should include location/GNSS behavior, reporting, local logs, and privacy details
 - Local logging comes before any upload/sync feature
 
 ## Notes
