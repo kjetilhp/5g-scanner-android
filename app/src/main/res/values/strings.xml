@@ -1,29 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Ask</string>
-    <string name="hello_title">Ask</string>
-    <string name="hello_subtitle">Hello scanner.</string>
-    <string name="app_purpose">Volunteer coverage scanner. Scanning starts automatically after consent unless paused. This simulator build uses mock telemetry so the scanner flow can be tested before a physical phone is available.</string>
     <string name="consent_intro">Before scanning, Ask needs your consent. Participation is voluntary.</string>
     <string name="consent_data_scope">When scanning is enabled, the app will collect location, timestamps, connectivity state, and cellular radio measurements where Android exposes them.</string>
     <string name="consent_local_only">This prototype stores data locally only. Upload and sharing are not enabled.</string>
-    <string name="consent_reversible">After consent, scanning starts automatically unless paused. You can pause scanning later or uninstall the app to stop participating.</string>
+    <string name="consent_reversible">After consent, scanning starts automatically unless stopped. You can stop scanning later or uninstall the app to stop participating.</string>
     <string name="grant_consent">Grant consent</string>
-    <string name="consent_granted">Consent granted. You can pause scanning or uninstall the app to stop participating.</string>
-    <string name="status_format">Status: %1$s</string>
-    <string name="status_consent_required">Consent required</string>
-    <string name="status_paused_manual">Paused until you resume</string>
-    <string name="status_paused_until">Paused until %1$s</string>
-    <string name="status_scanning">Scanning mock telemetry</string>
+    <string name="status_stopped_manual">Scanner stopped</string>
+    <string name="status_stopped_until">Scanner will start %1$s</string>
+    <string name="status_scanning">Scanner active</string>
     <string name="samples_format">Samples this session: %1$d</string>
     <string name="last_sample_format">Last sample: %1$s</string>
     <string name="never">never</string>
-    <string name="pause_scanning">Pause scanning</string>
-    <string name="pause_scanning_title">Pause scanning</string>
-    <string name="pause_until_i_start">Until I start again</string>
-    <string name="pause_15_minutes">For 15 minutes</string>
-    <string name="pause_1_hour">For 1 hour</string>
-    <string name="resume_scanning">Resume</string>
+    <string name="mock_telemetry_title">Mock telemetry</string>
+    <string name="stop_scanning">Stop scanning</string>
+    <string name="stop_scanning_title">Stop scanning</string>
+    <string name="stop_until_i_start">Until I start again</string>
+    <string name="stop_15_minutes">For 15 minutes</string>
+    <string name="stop_1_hour">For 1 hour</string>
+    <string name="start_scanning">Start scanning</string>
     <string name="no_samples_yet">No mock samples yet.</string>
     <string name="open_settings">Settings</string>
     <string name="settings_title">Settings</string>
@@ -37,5 +32,5 @@
     <string name="setting_storage_title">Storage</string>
     <string name="setting_storage_summary">Coverage samples are stored locally on this device. Upload is not enabled in this prototype.</string>
     <string name="setting_participation_title">Participation</string>
-    <string name="setting_participation_summary">Scanning can be paused from the main screen. Uninstalling the app stops participation.</string>
+    <string name="setting_participation_summary">Scanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
 </resources>

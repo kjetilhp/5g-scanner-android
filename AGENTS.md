@@ -20,7 +20,7 @@ Do not embed or port the Node.js scanner wholesale into Android unless explicitl
 
 Keep Android API usage at the edges. Domain models, encoders, and validation should be plain Kotlin where possible.
 
-The first Android app experience should be simple and consent-led: users voluntarily participate in crowdsourced coverage mapping and can pause scanning temporarily. Consent must be a blocking full-screen gate; scanner controls and settings should not be shown until app-level consent is granted. In the current prototype, stopping participation after consent is handled by pausing or uninstalling the app rather than an in-app revoke control.
+The first Android app experience should be simple and consent-led: users voluntarily participate in crowdsourced coverage mapping and can stop scanning temporarily. Consent must be a blocking full-screen gate; scanner controls and settings should not be shown until app-level consent is granted. In the current prototype, stopping participation after consent is handled by stopping scanning or uninstalling the app rather than an in-app revoke control.
 
 ## Reference Contract
 
@@ -56,7 +56,7 @@ Start scanner work automatically when the effective state allows it:
 
 - App-level consent is granted
 - Required Android permissions are granted
-- Scanning is not paused until a future date/time
+- Scanning is not stopped until a future date/time
 
 Initial versions should assume local logging only. Upload/sync behavior is intentionally deferred and must require a later explicit product/privacy decision before implementation.
 
@@ -66,7 +66,7 @@ Keep the first usable UI small:
 
 - Consent/onboarding
 - Main scanner status and telemetry
-- A single pause/resume control on the main scanner screen
+- A single stop/start control on the main scanner screen
 - Separate settings screen for less frequent controls
 
 Use clear language around what is collected, why it is collected, where it is stored, and how participation can stop. Avoid dark patterns around consent, permissions, scanning state, deletion, or later upload behavior.

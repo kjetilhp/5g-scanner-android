@@ -10,7 +10,7 @@ Planning and project setup plus a simulator-friendly Android scanner prototype.
 
 The Android app name is `Ask`, and the package/application id is `no.politiet.pit`.
 
-The current product direction is a small, consent-led scanner app: the user voluntarily turns scanning on, can pause or stop it, and can revoke participation. Initial logging is local-only; upload/sync behavior is intentionally deferred.
+The current product direction is a small, consent-led scanner app: the user voluntarily participates in scanning, can stop and start it, and can stop participating by uninstalling the app. Initial logging is local-only; upload/sync behavior is intentionally deferred.
 
 ## Reference Project
 
@@ -68,7 +68,7 @@ The emulator build currently uses mock telemetry. It supports:
 - Blocking first-run consent before scanner controls are shown
 - Grant app-level consent
 - Automatic mock scanning after consent
-- Single pause/resume control on the main scanner screen
+- Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
 - Separate settings screen for sampling frequency and GNSS mode
 
@@ -117,9 +117,9 @@ docs/architecture-notes.md
 Core first-version assumptions:
 
 - Scanning requires app-level consent and Android permission grants
-- Consent can be revoked separately from OS permissions
+- Participation can stop by stopping scanning or uninstalling the app
 - The main UI should expose a clear scanning on/off control
-- Settings should include sampling frequency, pause controls, and location/GNSS behavior
+- Settings should include sampling frequency, stop/start controls, and location/GNSS behavior
 - Local logging comes before any upload/sync feature
 
 ## Notes

@@ -1,9 +1,12 @@
 package no.politiet.pit
 
+import android.animation.ObjectAnimator
 import android.app.Activity
 import android.app.AlertDialog
+import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -13,7 +16,9 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -29,8 +34,8 @@ class MainActivity : Activity() {
         .withZone(ZoneId.systemDefault())
 
     private var consentGranted = false
-    private var pausedManually = false
-    private var pausedUntil: Instant? = null
+    private var stoppedManually = false
+    private var stoppedUntil: Instant? = null
     private var showingSettings = false
     private var sampleCount = 0
     private var lastSampleAt: Instant? = null
@@ -41,7 +46,9 @@ class MainActivity : Activity() {
     private var sampleText: TextView? = null
     private var lastSampleText: TextView? = null
     private var mockLogText: TextView? = null
-    private var pauseButton: Button? = null
+    private var stopStartButton: ImageButton? = null
+    private var scannerActivityRing: View? = null
+    private var scannerActivityRingAnimator: ObjectAnimator? = null
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -62,6 +69,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(sampler)
+        scannerActivityRingAnimator?.cancel()
         super.onDestroy()
     }
 
@@ -103,39 +111,71 @@ class MainActivity : Activity() {
     }
 
     private fun createScannerView(): View {
-        val root = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(40, 40, 40, 40)
+            setPadding(dp(28), statusBarHeight() + dp(28), dp(28), dp(152))
         }
 
-        root.addView(title("Ask"))
+        content.addView(scannerTitle())
 
-        root.addView(section("Scanner"))
-        statusText = body("")
-        sampleText = body("")
-        lastSampleText = body("")
-        root.addView(statusText)
-        root.addView(sampleText)
-        root.addView(lastSampleText)
-        pauseButton = actionButton(getString(R.string.pause_15_minutes)) {
-            if (!isPaused()) {
-                showPauseDialog()
+        val metrics = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(28), 0, dp(28))
+        }
+        sampleText = scannerMetricText()
+        lastSampleText = scannerMetricText()
+        metrics.addView(sampleText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        metrics.addView(lastSampleText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        content.addView(metrics)
+
+        content.addView(scannerSection(getString(R.string.mock_telemetry_title)))
+        mockLogText = scannerLogText(getString(R.string.no_samples_yet))
+        content.addView(mockLogText)
+
+        val scrollView = ScrollView(this).apply {
+            isFillViewport = true
+            addView(content)
+        }
+
+        stopStartButton = scannerIconButton(R.drawable.ic_stop_32, getString(R.string.stop_scanning), dp(56)) {
+            if (!isStopped()) {
+                showStopDialog()
             } else {
-                resumeScanning()
+                startScanning()
             }
         }
-        root.addView(pauseButton)
 
-        root.addView(section("Mock Telemetry"))
-        mockLogText = body(getString(R.string.no_samples_yet))
-        root.addView(mockLogText)
-        root.addView(actionButton(getString(R.string.open_settings)) {
+        statusText = scannerStatusText()
+        scannerActivityRing = ScannerActivityRing()
+        val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
             render()
-        })
+        }
 
-        return ScrollView(this).apply {
-            addView(root)
+        return FrameLayout(this).apply {
+            setBackgroundColor(SCANNER_BACKGROUND)
+            addView(scrollView)
+            val controlBottomMargin = navigationBarHeight() + dp(160)
+            addView(statusText, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            ).apply {
+                leftMargin = dp(28)
+                rightMargin = dp(28)
+                bottomMargin = controlBottomMargin + dp(136)
+            })
+            addView(scannerActivityRing, FrameLayout.LayoutParams(dp(144), dp(144), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = controlBottomMargin - dp(16)
+            })
+            addView(stopStartButton, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = controlBottomMargin
+            })
+            addView(settingsButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = dp(24)
+                bottomMargin = navigationBarHeight() + dp(40)
+            })
         }
     }
 
@@ -211,7 +251,10 @@ class MainActivity : Activity() {
         sampleText = null
         lastSampleText = null
         mockLogText = null
-        pauseButton = null
+        stopStartButton = null
+        scannerActivityRingAnimator?.cancel()
+        scannerActivityRingAnimator = null
+        scannerActivityRing = null
     }
 
     private fun captureMockSample() {
@@ -228,21 +271,21 @@ class MainActivity : Activity() {
         updateScannerUi()
     }
 
-    private fun showPauseDialog() {
+    private fun showStopDialog() {
         val options = arrayOf(
-            getString(R.string.pause_until_i_start),
-            getString(R.string.pause_15_minutes),
-            getString(R.string.pause_1_hour),
+            getString(R.string.stop_until_i_start),
+            getString(R.string.stop_15_minutes),
+            getString(R.string.stop_1_hour),
         )
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.pause_scanning_title))
+            .setTitle(getString(R.string.stop_scanning_title))
             .setItems(options) { _, which ->
-        pausedUntil = when (which) {
+                stoppedUntil = when (which) {
                     0 -> null
                     1 -> Instant.now().plusSeconds(15 * 60)
                     else -> Instant.now().plusSeconds(60 * 60)
                 }
-                pausedManually = which == 0
+                stoppedManually = which == 0
                 handler.removeCallbacks(sampler)
                 updateScannerUi()
             }
@@ -250,19 +293,19 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun resumeScanning() {
-        pausedManually = false
-        pausedUntil = null
+    private fun startScanning() {
+        stoppedManually = false
+        stoppedUntil = null
         ensureSamplerState()
         updateScannerUi()
     }
 
     private fun canSample(): Boolean {
-        val pause = pausedUntil
-        if (pause != null && Instant.now().isAfter(pause)) {
-            pausedUntil = null
+        val stop = stoppedUntil
+        if (stop != null && Instant.now().isAfter(stop)) {
+            stoppedUntil = null
         }
-        return consentGranted && !pausedManually && pausedUntil == null
+        return consentGranted && !stoppedManually && stoppedUntil == null
     }
 
     private fun ensureSamplerState() {
@@ -275,29 +318,34 @@ class MainActivity : Activity() {
     private fun updateScannerUi() {
         val effectiveStatus = currentScannerStatus()
 
-        statusText?.text = getString(R.string.status_format, effectiveStatus)
+        statusText?.text = effectiveStatus
         sampleText?.text = getString(R.string.samples_format, sampleCount)
         lastSampleText?.text = getString(
             R.string.last_sample_format,
             lastSampleAt?.let(clockFormatter::format) ?: getString(R.string.never),
         )
-        pauseButton?.text = if (isPaused()) {
-            getString(R.string.resume_scanning)
-        } else {
-            getString(R.string.pause_scanning)
+        stopStartButton?.apply {
+            if (isStopped()) {
+                setImageResource(R.drawable.ic_play_arrow_32)
+                contentDescription = getString(R.string.start_scanning)
+            } else {
+                setImageResource(R.drawable.ic_stop_32)
+                contentDescription = getString(R.string.stop_scanning)
+            }
         }
+        updateScannerActivityRing(canSample())
     }
 
     private fun currentScannerStatus(): String {
-        val pause = pausedUntil
+        val stop = stoppedUntil
         return when {
-            pausedManually -> getString(R.string.status_paused_manual)
-            pause != null -> getString(R.string.status_paused_until, clockFormatter.format(pause))
+            stoppedManually -> getString(R.string.status_stopped_manual)
+            stop != null -> getString(R.string.status_stopped_until, clockFormatter.format(stop))
             else -> getString(R.string.status_scanning)
         }
     }
 
-    private fun isPaused(): Boolean = pausedManually || pausedUntil != null
+    private fun isStopped(): Boolean = stoppedManually || stoppedUntil != null
 
     private fun loadState() {
         val preferences = getPreferences(MODE_PRIVATE)
@@ -325,16 +373,85 @@ class MainActivity : Activity() {
         setPadding(0, 0, 0, 12)
     }
 
-    private fun section(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 20f
-        setPadding(0, 32, 0, 8)
-    }
-
     private fun body(text: String): TextView = TextView(this).apply {
         this.text = text
         textSize = 16f
         setPadding(0, 4, 0, 4)
+    }
+
+    private fun scannerTitle(): TextView = TextView(this).apply {
+        text = getString(R.string.app_name)
+        textSize = 44f
+        setTextColor(Color.WHITE)
+        includeFontPadding = false
+        setPadding(0, 0, 0, dp(18))
+    }
+
+    private fun scannerStatusText(): TextView = TextView(this).apply {
+        textSize = 18f
+        setTextColor(SCANNER_SOFT_TEXT)
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+    }
+
+    private fun scannerMetricText(): TextView = TextView(this).apply {
+        textSize = 15f
+        setTextColor(SCANNER_SOFT_TEXT)
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        setPadding(dp(6), 0, dp(6), 0)
+    }
+
+    private fun scannerSection(text: String): TextView = TextView(this).apply {
+        this.text = text.uppercase()
+        textSize = 13f
+        setTextColor(SCANNER_SOFT_TEXT)
+        includeFontPadding = false
+        setPadding(0, dp(12), 0, dp(10))
+    }
+
+    private fun scannerLogText(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 15f
+        setTextColor(Color.WHITE)
+        setLineSpacing(dp(2).toFloat(), 1f)
+        background = roundedBackground(SCANNER_PANEL, dp(8))
+        setPadding(dp(18), dp(16), dp(18), dp(16))
+    }
+
+    private fun scannerIconButton(icon: Int, description: String, radius: Int, onClick: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(icon)
+            setColorFilter(SCANNER_BACKGROUND)
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = description
+            background = RippleDrawable(
+                ColorStateList.valueOf(SCANNER_BUTTON_RIPPLE),
+                roundedBackground(Color.WHITE, radius),
+                roundedBackground(Color.WHITE, radius),
+            )
+            elevation = dp(8).toFloat()
+            setOnClickListener { onClick() }
+        }
+
+    private fun updateScannerActivityRing(isActive: Boolean) {
+        val ring = scannerActivityRing ?: return
+        if (!isActive) {
+            scannerActivityRingAnimator?.cancel()
+            scannerActivityRingAnimator = null
+            ring.visibility = View.INVISIBLE
+            ring.rotation = 0f
+            return
+        }
+
+        ring.visibility = View.VISIBLE
+        if (scannerActivityRingAnimator?.isStarted == true) return
+        scannerActivityRingAnimator = ObjectAnimator.ofFloat(ring, View.ROTATION, 0f, 360f).apply {
+            duration = 1600L
+            interpolator = LinearInterpolator()
+            repeatCount = ObjectAnimator.INFINITE
+            start()
+        }
     }
 
     private fun actionButton(text: String, onClick: () -> Unit): Button =
@@ -366,7 +483,6 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = getString(R.string.settings_title)
                 textSize = 20f
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(SETTINGS_TEXT)
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -376,7 +492,6 @@ class MainActivity : Activity() {
         TextView(this).apply {
             this.text = text.uppercase()
             textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
             setTextColor(SETTINGS_ACCENT)
             includeFontPadding = false
             setPadding(dp(16), dp(24), dp(16), dp(8))
@@ -522,6 +637,29 @@ class MainActivity : Activity() {
         return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
     }
 
+    private fun navigationBarHeight(): Int {
+        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
+    }
+
+    private inner class ScannerActivityRing : View(this@MainActivity) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SCANNER_RING
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = dp(3).toFloat()
+        }
+        private val bounds = RectF()
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val inset = paint.strokeWidth / 2f + dp(4)
+            bounds.set(inset, inset, width - inset, height - inset)
+            canvas.drawArc(bounds, -90f, 82f, false, paint)
+            canvas.drawArc(bounds, 62f, 34f, false, paint)
+        }
+    }
+
     private enum class SamplingFrequency(val label: String, val intervalMs: Long) {
         LowImpact("Low impact", 60_000),
         Balanced("Balanced", 15_000),
@@ -558,6 +696,11 @@ class MainActivity : Activity() {
         const val KEY_CONSENT_GRANTED = "consentGranted"
         const val KEY_FREQUENCY = "frequency"
         const val KEY_GNSS_MODE = "gnssMode"
+        val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
+        val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)
+        val SCANNER_SOFT_TEXT: Int = Color.argb(204, 255, 255, 255)
+        val SCANNER_BUTTON_RIPPLE: Int = Color.argb(31, 15, 118, 110)
+        val SCANNER_RING: Int = Color.argb(178, 255, 255, 255)
         val SETTINGS_BACKGROUND: Int = Color.rgb(246, 247, 249)
         val SETTINGS_TEXT: Int = Color.rgb(31, 41, 55)
         val SETTINGS_SUBTLE_TEXT: Int = Color.rgb(91, 103, 119)
