@@ -76,20 +76,22 @@ The Gradle wrapper is committed so the project can be built consistently from An
 
 ## Icon Workflow
 
-The app icon and favicon files are generated from a single square SVG source:
+The app icon and favicon files are based on a single square SVG source:
 
 ```text
 assets/icon/source.svg
 ```
 
-It uses a `1024x1024` canvas with grid-aligned geometry so small launcher and favicon outputs stay crisp. Install the small dev toolchain once, then regenerate icons with:
+It uses a `1024x1024` canvas with grid-aligned geometry so small launcher and favicon outputs stay crisp. Android launcher icons use adaptive icon XML plus the vector foreground in `app/src/main/res/drawable/ic_launcher_foreground.xml`; no density-specific launcher PNGs are generated because the app targets Android 8+.
+
+Install the small dev toolchain once, then regenerate favicon files with:
 
 ```text
 npm install
 npm run icons
 ```
 
-The script uses the pinned `@resvg/resvg-js` dev dependency for deterministic SVG rasterization. Generated Android assets are written to `app/src/main/res/mipmap-*`; generated favicon assets are written to `assets/icon/generated/`.
+The script uses the pinned `@resvg/resvg-js` dev dependency for deterministic SVG rasterization. Generated favicon assets are written to `assets/icon/generated/`.
 
 ## Output Format
 

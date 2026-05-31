@@ -94,6 +94,6 @@ When adding Android code, keep modules separated roughly as:
 - `samples/` for copied or minimized example logs
 - `scripts/` for maintenance scripts such as icon generation
 
-App icons are generated from `assets/icon/source.svg`. Run `npm run icons` after changing that source to refresh Android launcher PNGs and generated favicon files.
+App icons are based on `assets/icon/source.svg`. Android launcher icons use adaptive icon XML plus `app/src/main/res/drawable/ic_launcher_foreground.xml`; run `npm run icons` after changing the source to refresh generated favicon files.
 
 Do not commit large generated datasets unless they are intentionally curated fixtures.
