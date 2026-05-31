@@ -7,7 +7,9 @@ import android.app.AlertDialog
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.DashPathEffect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -45,9 +47,9 @@ class MainActivity : Activity() {
     private var gnssMode = GnssMode.Balanced
 
     private var statusText: TextView? = null
-    private var sampleText: TextView? = null
-    private var lastSampleText: TextView? = null
+    private var sessionSampleText: TextView? = null
     private var telemetryBars: TelemetryBarsView? = null
+    private var titleSignalIcon: SignalQualityIconView? = null
     private var stopStartButton: ImageButton? = null
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
@@ -119,20 +121,9 @@ class MainActivity : Activity() {
             setPadding(dp(28), statusBarHeight() + dp(28), dp(28), dp(152))
         }
 
-        content.addView(scannerTitle())
+        content.addView(scannerTitleBlock())
 
-        val metrics = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, dp(28), 0, dp(28))
-        }
-        sampleText = scannerMetricText()
-        lastSampleText = scannerMetricText()
-        metrics.addView(sampleText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        metrics.addView(lastSampleText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        content.addView(metrics)
-
-        content.addView(scannerSection(getString(R.string.latest_measurement_title)))
+        content.addView(scannerSectionHeader(getString(R.string.latest_measurement_title)))
         telemetryBars = TelemetryBarsView().apply {
             setMetrics(latestTelemetry.metrics(), animate = false)
         }
@@ -155,6 +146,7 @@ class MainActivity : Activity() {
         }
 
         statusText = scannerStatusText()
+        sessionSampleText = scannerSessionSampleText()
         scannerActivityRing = ScannerActivityRing()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
@@ -179,6 +171,15 @@ class MainActivity : Activity() {
             })
             addView(stopStartButton, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin
+            })
+            addView(sessionSampleText, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            ).apply {
+                leftMargin = dp(28)
+                rightMargin = dp(28)
+                bottomMargin = controlBottomMargin - dp(38)
             })
             addView(settingsButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply {
                 marginEnd = dp(24)
@@ -256,9 +257,9 @@ class MainActivity : Activity() {
 
     private fun clearScannerViews() {
         statusText = null
-        sampleText = null
-        lastSampleText = null
+        sessionSampleText = null
         telemetryBars = null
+        titleSignalIcon = null
         stopStartButton = null
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
@@ -321,11 +322,13 @@ class MainActivity : Activity() {
         val effectiveStatus = currentScannerStatus()
 
         statusText?.text = effectiveStatus
-        sampleText?.text = getString(R.string.samples_format, sampleCount)
-        lastSampleText?.text = getString(
-            R.string.last_sample_format,
-            lastSampleAt?.let(clockFormatter::format) ?: getString(R.string.never),
+        sessionSampleText?.text = resources.getQuantityString(
+            R.plurals.samples_this_session,
+            sampleCount,
+            sampleCount,
         )
+        sessionSampleText?.visibility = if (canSample()) View.VISIBLE else View.INVISIBLE
+        titleSignalIcon?.setQuality(latestTelemetry.overallQuality(), animate = sampleCount > 0)
         stopStartButton?.apply {
             if (isStopped()) {
                 setImageResource(R.drawable.ic_play_arrow_32)
@@ -381,13 +384,45 @@ class MainActivity : Activity() {
         setPadding(0, 4, 0, 4)
     }
 
-    private fun scannerTitle(): TextView = TextView(this).apply {
-        text = getString(R.string.app_name)
-        textSize = 44f
-        setTextColor(Color.WHITE)
-        includeFontPadding = false
-        setPadding(0, 0, 0, dp(18))
-    }
+    private fun scannerTitleBlock(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, 0, 0, dp(18))
+
+            addView(scannerTitleHeader())
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.app_subtitle)
+                textSize = 14f
+                setTextColor(SCANNER_SOFT_TEXT)
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setPadding(0, dp(4), 0, 0)
+            })
+        }
+
+    private fun scannerTitleHeader(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+
+            titleSignalIcon = SignalQualityIconView().apply {
+                setQuality(latestTelemetry.overallQuality(), animate = false)
+            }
+            addView(titleSignalIcon, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                marginEnd = dp(12)
+            })
+
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.app_name)
+                textSize = 44f
+                setTextColor(Color.WHITE)
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
 
     private fun scannerStatusText(): TextView = TextView(this).apply {
         textSize = 18f
@@ -396,12 +431,11 @@ class MainActivity : Activity() {
         includeFontPadding = false
     }
 
-    private fun scannerMetricText(): TextView = TextView(this).apply {
-        textSize = 15f
+    private fun scannerSessionSampleText(): TextView = TextView(this).apply {
+        textSize = 12f
         setTextColor(SCANNER_SOFT_TEXT)
         gravity = Gravity.CENTER
         includeFontPadding = false
-        setPadding(dp(6), 0, dp(6), 0)
     }
 
     private fun scannerSection(text: String): TextView = TextView(this).apply {
@@ -410,6 +444,41 @@ class MainActivity : Activity() {
         setTextColor(SCANNER_SOFT_TEXT)
         includeFontPadding = false
         setPadding(0, dp(12), 0, dp(10))
+    }
+
+    private fun scannerSectionHeader(text: String): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, dp(10))
+
+            addView(TextView(this@MainActivity).apply {
+                this.text = text.uppercase()
+                textSize = 13f
+                setTextColor(SCANNER_SOFT_TEXT)
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            addView(ImageButton(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_help_24)
+                setColorFilter(SCANNER_SOFT_TEXT)
+                scaleType = ImageView.ScaleType.CENTER
+                contentDescription = getString(R.string.measurement_help_action)
+                background = RippleDrawable(
+                    ColorStateList.valueOf(SCANNER_BUTTON_RIPPLE),
+                    roundedBackground(Color.TRANSPARENT, dp(18)),
+                    roundedBackground(Color.WHITE, dp(18)),
+                )
+                setOnClickListener { showMeasurementHelp() }
+            }, LinearLayout.LayoutParams(dp(36), dp(36)))
+        }
+
+    private fun showMeasurementHelp() {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.measurement_help_title))
+            .setMessage(getString(R.string.measurement_help_body))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun scannerIconButton(icon: Int, description: String, radius: Int, onClick: () -> Unit): ImageButton =
@@ -664,6 +733,16 @@ class MainActivity : Activity() {
             color = SCANNER_BAR_TRACK
             style = Paint.Style.FILL
         }
+        private val gnssPanelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SCANNER_GNSS_PANEL
+            style = Paint.Style.FILL
+        }
+        private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SCANNER_GNSS_DIVIDER
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1).toFloat()
+            pathEffect = DashPathEffect(floatArrayOf(dp(2).toFloat(), dp(4).toFloat()), 0f)
+        }
         private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
         }
@@ -672,6 +751,7 @@ class MainActivity : Activity() {
             strokeCap = Paint.Cap.ROUND
             strokeWidth = 1f
         }
+        private val previousArrowPath = Path()
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textAlign = Paint.Align.CENTER
@@ -683,6 +763,7 @@ class MainActivity : Activity() {
             textSize = dp(11).toFloat()
         }
         private val barBounds = RectF()
+        private val gnssPanelPath = Path()
 
         init {
             background = roundedBackground(SCANNER_PANEL, dp(8))
@@ -744,6 +825,12 @@ class MainActivity : Activity() {
             val availableHeight = bottom - top
             val segmentWidth = width.toFloat() / metrics.size
             val barWidth = minOf(dp(34).toFloat(), segmentWidth * 0.42f)
+            val hasGnss = metrics.any { it.kind == MetricKind.Gnss }
+            if (hasGnss) {
+                val dividerX = segmentWidth * 3f
+                drawRightRoundedPanel(canvas, dividerX)
+                canvas.drawLine(dividerX, dp(14).toFloat(), dividerX, height - dp(14).toFloat(), dividerPaint)
+            }
 
             metrics.forEachIndexed { index, metric ->
                 val centerX = segmentWidth * index + segmentWidth / 2f
@@ -762,19 +849,133 @@ class MainActivity : Activity() {
                 animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
                     val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
                     canvas.drawLine(left - dp(3), markerY, right + dp(3), markerY, previousPaint)
+                    drawPreviousMarkerArrow(
+                        canvas = canvas,
+                        x = right + dp(8),
+                        y = markerY,
+                        previousQuality = previousQuality,
+                        currentQuality = metric.quality,
+                    )
                 }
 
                 canvas.drawText(metric.label, centerX, height - dp(40).toFloat(), labelPaint)
                 canvas.drawText(metric.valueText, centerX, height - dp(18).toFloat(), valuePaint)
             }
         }
+
+        private fun drawRightRoundedPanel(canvas: Canvas, left: Float) {
+            val radius = dp(8).toFloat()
+            val right = width.toFloat()
+            val bottom = height.toFloat()
+
+            gnssPanelPath.reset()
+            gnssPanelPath.moveTo(left, 0f)
+            gnssPanelPath.lineTo(right - radius, 0f)
+            gnssPanelPath.quadTo(right, 0f, right, radius)
+            gnssPanelPath.lineTo(right, bottom - radius)
+            gnssPanelPath.quadTo(right, bottom, right - radius, bottom)
+            gnssPanelPath.lineTo(left, bottom)
+            gnssPanelPath.close()
+            canvas.drawPath(gnssPanelPath, gnssPanelPaint)
+        }
+
+        private fun drawPreviousMarkerArrow(
+            canvas: Canvas,
+            x: Float,
+            y: Float,
+            previousQuality: Float,
+            currentQuality: Float,
+        ) {
+            val delta = currentQuality - previousQuality
+            if (kotlin.math.abs(delta) < 0.03f) return
+
+            val size = dp(4).toFloat()
+            previousArrowPath.reset()
+            if (delta > 0f) {
+                previousArrowPath.moveTo(x, y - size)
+                previousArrowPath.lineTo(x - size, y + size)
+                previousArrowPath.lineTo(x + size, y + size)
+            } else {
+                previousArrowPath.moveTo(x, y + size)
+                previousArrowPath.lineTo(x - size, y - size)
+                previousArrowPath.lineTo(x + size, y - size)
+            }
+            previousArrowPath.close()
+            canvas.drawPath(previousArrowPath, previousPaint)
+        }
+    }
+
+    private inner class SignalQualityIconView : View(this@MainActivity) {
+        private var displayedQuality = 0f
+        private var qualityAnimator: ValueAnimator? = null
+        private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        private val barBounds = RectF()
+
+        fun setQuality(quality: Float, animate: Boolean) {
+            val target = quality.coerceIn(0f, 1f)
+            qualityAnimator?.cancel()
+            if (!animate) {
+                displayedQuality = target
+                invalidate()
+                return
+            }
+
+            val start = displayedQuality
+            qualityAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 420L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    val progress = animator.animatedValue as Float
+                    displayedQuality = start + (target - start) * progress
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val gap = width * 0.08f
+            val barWidth = (width - gap * 5f) / 4f
+            val maxHeight = height * 0.82f
+            val bottom = signalBaseline()
+            val litBars = kotlin.math.ceil(displayedQuality * 4f).toInt().coerceIn(0, 4)
+
+            repeat(4) { index ->
+                val left = gap + index * (barWidth + gap)
+                val fullBarHeight = maxHeight * (0.35f + index * 0.18f)
+                val top = bottom - fullBarHeight
+                val isLit = index < litBars
+
+                barPaint.color = Color.argb(58, 255, 255, 255)
+                barBounds.set(left, top, left + barWidth, bottom)
+                canvas.drawRoundRect(barBounds, dp(3).toFloat(), dp(3).toFloat(), barPaint)
+
+                if (isLit) {
+                    barPaint.color = SCANNER_TITLE_SIGNAL
+                    barBounds.set(left, top, left + barWidth, bottom)
+                    canvas.drawRoundRect(barBounds, dp(3).toFloat(), dp(3).toFloat(), barPaint)
+                }
+            }
+        }
+
+        private fun signalBaseline(): Float =
+            height * 0.84f
     }
 
     private data class MetricQuality(
         val label: String,
         val valueText: String,
         val quality: Float,
+        val kind: MetricKind,
     )
+
+    private enum class MetricKind {
+        Radio,
+        Gnss,
+    }
 
     private data class MockTelemetry(
         val rsrp: Int,
@@ -785,10 +986,19 @@ class MainActivity : Activity() {
         val gnssMode: GnssMode,
     ) {
         fun metrics(): List<MetricQuality> = listOf(
-            MetricQuality("RSRP", "$rsrp", qualityFromRange(rsrp.toFloat(), -118f, -82f)),
-            MetricQuality("RSRQ", "$rsrq", qualityFromRange(rsrq.toFloat(), -20f, -8f)),
-            MetricQuality("SINR", "$sinr", qualityFromRange(sinr.toFloat(), 0f, 24f)),
-            MetricQuality("GNSS", "H${formatHdop(hdop)} ${fixAgeSeconds}s", gnssQuality(hdop, fixAgeSeconds)),
+            MetricQuality("RSRP", "$rsrp dBm", qualityFromRange(rsrp.toFloat(), -118f, -82f), MetricKind.Radio),
+            MetricQuality("RSRQ", "$rsrq dB", qualityFromRange(rsrq.toFloat(), -20f, -8f), MetricKind.Radio),
+            MetricQuality("SINR", "$sinr dB", qualityFromRange(sinr.toFloat(), 0f, 24f), MetricKind.Radio),
+            MetricQuality("GNSS", "HDOP ${formatHdop(hdop)} / ${fixAgeSeconds}s", gnssQuality(hdop, fixAgeSeconds), MetricKind.Gnss),
+        )
+
+        fun overallQuality(): Float =
+            radioQuality().average().toFloat().coerceIn(0f, 1f)
+
+        private fun radioQuality(): List<Float> = listOf(
+            qualityFromRange(rsrp.toFloat(), -118f, -82f),
+            qualityFromRange(rsrq.toFloat(), -20f, -8f),
+            qualityFromRange(sinr.toFloat(), 0f, 24f),
         )
 
         companion object {
@@ -796,7 +1006,7 @@ class MainActivity : Activity() {
                 MockTelemetry(-98, -13, 12, if (gnssMode == GnssMode.HighAccuracy) 0.8f else 1.4f, 9, gnssMode)
 
             fun fromSample(sample: Int, gnssMode: GnssMode): MockTelemetry {
-            val wave = sample % 6
+                val wave = sample % 6
                 val rsrpValues = intArrayOf(-113, -100, -88, -96, -109, -84)
                 val rsrqValues = intArrayOf(-19, -15, -9, -12, -18, -8)
                 val sinrValues = intArrayOf(3, 10, 22, 15, 6, 24)
@@ -899,9 +1109,12 @@ class MainActivity : Activity() {
         val SCANNER_BUTTON_RIPPLE: Int = Color.argb(31, 15, 118, 110)
         val SCANNER_RING: Int = Color.argb(178, 255, 255, 255)
         val SCANNER_BAR_TRACK: Int = Color.argb(38, 255, 255, 255)
+        val SCANNER_GNSS_PANEL: Int = Color.argb(34, 0, 0, 0)
+        val SCANNER_GNSS_DIVIDER: Int = Color.argb(138, 255, 255, 255)
         val SCANNER_QUALITY_LOW: Int = Color.rgb(248, 113, 113)
         val SCANNER_QUALITY_MEDIUM: Int = Color.rgb(250, 204, 21)
         val SCANNER_QUALITY_HIGH: Int = Color.rgb(134, 239, 172)
+        val SCANNER_TITLE_SIGNAL: Int = Color.rgb(134, 239, 172)
         val SETTINGS_BACKGROUND: Int = Color.rgb(246, 247, 249)
         val SETTINGS_TEXT: Int = Color.rgb(31, 41, 55)
         val SETTINGS_SUBTLE_TEXT: Int = Color.rgb(91, 103, 119)
