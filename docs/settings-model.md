@@ -64,6 +64,35 @@ Passive
 
 The implementation can decide later whether to use Android platform location APIs, Google Play Services fused location, or both.
 
+### Reporting Mode
+
+Reporting controls how locally stored coverage logs leave the device.
+
+```text
+ReportingMode:
+  Hourly
+  Daily
+  Continuous
+  Manual
+```
+
+Examples:
+
+- Hourly: upload saved logs about once per hour for normal crowdsourcing while early reporting is being validated
+- Daily: upload saved logs about once per day for lower-impact crowdsourcing
+- Continuous: upload new samples soon after they are collected for developers, engineers, and live field testing
+- Manual: keep logs on the device until the user exports them, shares them, or uses a manual send action
+
+The scanner should still write locally first. Upload failures must leave data queued locally for later retry or manual export.
+
+Hourly is the initial default so early server-side reporting can be validated with reasonably fresh data while keeping ordinary crowdsourcing impact controlled. Daily may become the default later if collected data shows that a lower upload frequency is sufficient. Continuous is primarily for live field testing and should not be presented as the normal user path.
+
+Settings should always show Last sent as supporting text inside the reporting mode row. Last sent is app-wide reporting state and updates only after a successful network upload or prototype no-op upload succeeds.
+
+When Manual, Daily, or Hourly is selected, settings should also show a Send now action below the reporting mode row. It is a one-time manual upload action and should not change the automatic reporting mode. Continuous does not show Send now because it reports when new measurements are collected.
+
+When Daily or Hourly is selected, the app should schedule reporting from the current setting with Android's native scheduler. Continuous should not use the periodic scheduler; it should report when new signal measurements are collected. Until the first successful reporting trigger, Last sent should read `never`. The prototype reporting path makes a lightweight no-op network call and updates Last sent only when that call succeeds. Reporting is gated by app-level consent and network availability.
+
 ### Consent and Permissions
 
 Settings should include status and actions for:

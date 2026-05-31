@@ -36,6 +36,8 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val clockFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
         .withZone(ZoneId.systemDefault())
+    private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        .withZone(ZoneId.systemDefault())
 
     private var consentGranted = false
     private var stoppedManually = false
@@ -45,6 +47,8 @@ class MainActivity : Activity() {
     private var lastSampleAt: Instant? = null
     private var frequency = SamplingFrequency.Balanced
     private var gnssMode = GnssMode.Balanced
+    private var reportingMode = ReportingMode.Hourly
+    private var lastReportedAt: Instant? = null
 
     private var statusText: TextView? = null
     private var sessionSampleText: TextView? = null
@@ -54,12 +58,14 @@ class MainActivity : Activity() {
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
+    private var samplerScheduled = false
 
     private val sampler = object : Runnable {
         override fun run() {
+            samplerScheduled = false
             if (canSample()) {
                 captureMockSample()
-                handler.postDelayed(this, frequency.intervalMs)
+                scheduleNextSample(frequency.intervalMs)
             } else {
                 render()
             }
@@ -69,11 +75,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadState()
+        saveState()
         render()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(sampler)
+        samplerScheduled = false
         scannerActivityRingAnimator?.cancel()
         super.onDestroy()
     }
@@ -86,6 +94,7 @@ class MainActivity : Activity() {
         })
         if (consentGranted) {
             ensureSamplerState()
+            ensureReportingScheduler()
             updateScannerUi()
         }
     }
@@ -95,22 +104,40 @@ class MainActivity : Activity() {
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(40, 40, 40, 40)
+            setPadding(dp(24), statusBarHeight() + dp(32), dp(24), dp(24))
         }
 
-        content.addView(title("Ask"))
-        content.addView(body(getString(R.string.consent_intro)))
-        content.addView(body(getString(R.string.consent_data_scope)))
-        content.addView(body(getString(R.string.consent_local_only)))
-        content.addView(body(getString(R.string.consent_reversible)))
-        content.addView(actionButton(getString(R.string.grant_consent)) {
-            consentGranted = true
-            saveState()
-            handler.postDelayed({ render() }, CONSENT_TRANSITION_DELAY_MS)
+        content.addView(consentTitle(getString(R.string.app_name)))
+        content.addView(consentIntro(getString(R.string.consent_intro)))
+        content.addView(consentSection(
+            title = getString(R.string.consent_data_scope_title),
+            body = getString(R.string.consent_data_scope),
+        ))
+        content.addView(consentSection(
+            title = getString(R.string.consent_storage_title),
+            body = getString(R.string.consent_local_only),
+        ))
+        content.addView(consentSection(
+            title = getString(R.string.consent_control_title),
+            body = getString(R.string.consent_reversible),
+        ))
+        content.addView(Button(this).apply {
+            text = getString(R.string.grant_consent)
+            setOnClickListener {
+                consentGranted = true
+                saveState()
+                handler.postDelayed({ render() }, CONSENT_TRANSITION_DELAY_MS)
+            }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            topMargin = dp(24)
         })
 
         return ScrollView(this).apply {
+            setBackgroundColor(SETTINGS_BACKGROUND)
+            isFillViewport = true
             addView(content)
         }
     }
@@ -190,6 +217,7 @@ class MainActivity : Activity() {
 
     private fun createSettingsView(): View {
         clearScannerViews()
+        lastReportedAt = ReportingScheduler.lastReportedAt(this)
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -205,10 +233,6 @@ class MainActivity : Activity() {
             ) {
                 showSamplingFrequencyDialog()
             },
-            settingsInfoRow(
-                title = getString(R.string.setting_scanner_status_title),
-                summary = currentScannerStatus(),
-            ),
         ))
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_location)))
@@ -221,6 +245,26 @@ class MainActivity : Activity() {
                 showGnssModeDialog()
             },
         ))
+
+        val reportingRows = mutableListOf<View>(
+            settingsPreferenceRow(
+                title = getString(R.string.setting_reporting_mode_title),
+                summary = reportingSummary(),
+                value = reportingMode.label,
+            ) {
+                showReportingModeDialog()
+            },
+        )
+        if (reportingMode != ReportingMode.Continuous) {
+            reportingRows.add(settingsActionButtonRow(
+                title = getString(R.string.setting_send_now_title),
+                summary = getString(R.string.setting_send_now_summary),
+            ) {
+                sendNow()
+            })
+        }
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
+        content.addView(settingsGroup(*reportingRows.toTypedArray()))
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_privacy)))
         content.addView(settingsGroup(
@@ -271,6 +315,7 @@ class MainActivity : Activity() {
         lastSampleAt = Instant.now()
         latestTelemetry = MockTelemetry.fromSample(sampleCount, gnssMode)
         telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
+        triggerContinuousReporting()
         updateScannerUi()
     }
 
@@ -290,6 +335,7 @@ class MainActivity : Activity() {
                 }
                 stoppedManually = which == 0
                 handler.removeCallbacks(sampler)
+                samplerScheduled = false
                 updateScannerUi()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -312,9 +358,34 @@ class MainActivity : Activity() {
     }
 
     private fun ensureSamplerState() {
-        handler.removeCallbacks(sampler)
-        if (canSample()) {
-            handler.post(sampler)
+        if (!canSample()) {
+            handler.removeCallbacks(sampler)
+            samplerScheduled = false
+            return
+        }
+        scheduleNextSample(0L)
+    }
+
+    private fun scheduleNextSample(delayMs: Long) {
+        if (samplerScheduled) return
+        samplerScheduled = true
+        handler.postDelayed(sampler, delayMs)
+    }
+
+    private fun ensureReportingScheduler() {
+        ReportingScheduler.schedule(this, consentGranted, reportingMode.name)
+    }
+
+    private fun triggerContinuousReporting() {
+        if (consentGranted && reportingMode == ReportingMode.Continuous) {
+            ReportingScheduler.recordTrigger(this, reportingMode.name) { success ->
+                if (success) {
+                    lastReportedAt = ReportingScheduler.lastReportedAt(this)
+                    if (showingSettings) {
+                        render()
+                    }
+                }
+            }
         }
     }
 
@@ -353,24 +424,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun reportingSummary(): String =
+        getString(
+            R.string.setting_reporting_mode_summary_with_last_sent,
+            reportingMode.summary,
+            lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
+        )
+
     private fun isStopped(): Boolean = stoppedManually || stoppedUntil != null
 
     private fun loadState() {
-        val preferences = getPreferences(MODE_PRIVATE)
-        consentGranted = preferences.getBoolean(KEY_CONSENT_GRANTED, false)
+        val preferences = ReportingScheduler.appPreferences(this)
+        val legacyPreferences = getPreferences(MODE_PRIVATE)
+        consentGranted = preferences.getBoolean(
+            ReportingScheduler.KEY_CONSENT_GRANTED,
+            legacyPreferences.getBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, false),
+        )
         frequency = SamplingFrequency.fromName(
             preferences.getString(KEY_FREQUENCY, SamplingFrequency.Balanced.name),
         )
         gnssMode = GnssMode.fromName(
             preferences.getString(KEY_GNSS_MODE, GnssMode.Balanced.name),
         )
+        reportingMode = ReportingMode.fromName(
+            preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, ReportingMode.Hourly.name),
+        )
+        lastReportedAt = ReportingScheduler.lastReportedAt(this)
     }
 
     private fun saveState() {
-        getPreferences(MODE_PRIVATE).edit()
-            .putBoolean(KEY_CONSENT_GRANTED, consentGranted)
+        ReportingScheduler.appPreferences(this).edit()
+            .putBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, consentGranted)
             .putString(KEY_FREQUENCY, frequency.name)
             .putString(KEY_GNSS_MODE, gnssMode.name)
+            .putString(ReportingScheduler.KEY_REPORTING_MODE, reportingMode.name)
             .apply()
     }
 
@@ -386,6 +473,42 @@ class MainActivity : Activity() {
         textSize = 16f
         setPadding(0, 4, 0, 4)
     }
+
+    private fun consentTitle(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 28f
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        setTextColor(SETTINGS_TEXT)
+        includeFontPadding = false
+        setPadding(0, 0, 0, dp(12))
+    }
+
+    private fun consentIntro(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 16f
+        setTextColor(SETTINGS_SUBTLE_TEXT)
+        setPadding(0, 0, 0, dp(20))
+    }
+
+    private fun consentSection(title: String, body: String): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, dp(12))
+
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 16f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(SETTINGS_TEXT)
+                includeFontPadding = false
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = body
+                textSize = 14f
+                setTextColor(SETTINGS_SUBTLE_TEXT)
+                setPadding(0, dp(6), 0, 0)
+            })
+        }
 
     private fun scannerTitleBlock(): LinearLayout =
         LinearLayout(this).apply {
@@ -588,6 +711,49 @@ class MainActivity : Activity() {
     private fun settingsInfoRow(title: String, summary: String): LinearLayout =
         settingsRow(title, summary, value = null, isClickable = false)
 
+    private fun settingsActionRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
+        settingsRow(title, summary, value = null, isClickable = true).apply {
+            setOnClickListener { onClick() }
+        }
+
+    private fun settingsActionButtonRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = rippleBackground(Color.WHITE, dp(8))
+            isFocusable = true
+            setOnClickListener { onClick() }
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_send_24)
+                setColorFilter(SETTINGS_ACCENT)
+                scaleType = ImageView.ScaleType.CENTER
+            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply {
+                marginEnd = dp(16)
+            })
+
+            val textColumn = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            textColumn.addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 16f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(SETTINGS_ACCENT)
+                includeFontPadding = false
+            })
+            textColumn.addView(TextView(this@MainActivity).apply {
+                text = summary
+                textSize = 14f
+                setTextColor(SETTINGS_SUBTLE_TEXT)
+                setPadding(0, dp(4), 0, 0)
+            })
+            addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+
     private fun settingsRow(
         title: String,
         summary: String,
@@ -631,12 +797,10 @@ class MainActivity : Activity() {
                     maxLines = 2
                     setPadding(dp(16), 0, dp(8), 0)
                 }, LinearLayout.LayoutParams(dp(116), LinearLayout.LayoutParams.WRAP_CONTENT))
-                addView(TextView(this@MainActivity).apply {
-                    text = ">"
-                    textSize = 22f
-                    setTextColor(SETTINGS_CHEVRON)
-                    gravity = Gravity.CENTER
-                    includeFontPadding = false
+                addView(ImageView(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_chevron_right_24)
+                    setColorFilter(SETTINGS_CHEVRON)
+                    scaleType = ImageView.ScaleType.CENTER
                 }, LinearLayout.LayoutParams(dp(20), LinearLayout.LayoutParams.WRAP_CONTENT))
             }
         }
@@ -679,6 +843,39 @@ class MainActivity : Activity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun showReportingModeDialog() {
+        val labels = ReportingMode.entries.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.setting_reporting_mode_title))
+            .setSingleChoiceItems(labels, ReportingMode.entries.indexOf(reportingMode)) { dialog, which ->
+                reportingMode = ReportingMode.entries[which]
+                saveState()
+                ensureReportingScheduler()
+                dialog.dismiss()
+                render()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun sendNow() {
+        ReportingScheduler.recordTrigger(this, reportingMode.name) { success ->
+            lastReportedAt = ReportingScheduler.lastReportedAt(this)
+            render()
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.setting_send_now_title))
+                .setMessage(
+                    if (success) {
+                        getString(R.string.setting_send_now_success_message)
+                    } else {
+                        getString(R.string.setting_send_now_failed_message)
+                    },
+                )
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
     }
 
     private fun roundedBackground(color: Int, radius: Int): GradientDrawable =
@@ -1143,9 +1340,20 @@ class MainActivity : Activity() {
         }
     }
 
+    private enum class ReportingMode(val label: String, val summary: String) {
+        Hourly("Hourly", "Report saved coverage logs about once per hour"),
+        Daily("Daily", "Report saved coverage logs about once per day"),
+        Continuous("Continuous", "For live field testing. Uses more battery and network"),
+        Manual("Manual", "Keep logs on this device until you send or export them");
+
+        companion object {
+            fun fromName(value: String?): ReportingMode =
+                entries.firstOrNull { it.name == value } ?: Hourly
+        }
+    }
+
     private companion object {
         const val CONSENT_TRANSITION_DELAY_MS = 250L
-        const val KEY_CONSENT_GRANTED = "consentGranted"
         const val KEY_FREQUENCY = "frequency"
         const val KEY_GNSS_MODE = "gnssMode"
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
