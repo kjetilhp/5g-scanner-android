@@ -56,7 +56,6 @@ class MainActivity : Activity() {
     private var lastReportedAt: Instant? = null
 
     private var statusText: TextView? = null
-    private var sessionSampleText: TextView? = null
     private var telemetryBars: TelemetryBarsView? = null
     private var titleSignalIcon: SignalQualityIconView? = null
     private var stopStartButton: ImageButton? = null
@@ -207,7 +206,6 @@ class MainActivity : Activity() {
         }
 
         statusText = scannerStatusText()
-        sessionSampleText = scannerSessionSampleText()
         scannerActivityRing = ScannerActivityRing()
         sleepIndicator = SleepIndicatorView()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
@@ -237,15 +235,6 @@ class MainActivity : Activity() {
                 bottomMargin = controlBottomMargin
             })
             addView(sleepIndicator, FrameLayout.LayoutParams(dp(188), dp(188), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = controlBottomMargin - dp(38)
-            })
-            addView(sessionSampleText, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-            ).apply {
-                leftMargin = dp(28)
-                rightMargin = dp(28)
                 bottomMargin = controlBottomMargin - dp(38)
             })
             addView(settingsButton, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.END).apply {
@@ -476,7 +465,6 @@ class MainActivity : Activity() {
 
     private fun clearScannerViews() {
         statusText = null
-        sessionSampleText = null
         telemetryBars = null
         titleSignalIcon = null
         stopStartButton = null
@@ -554,11 +542,13 @@ class MainActivity : Activity() {
         stoppedManually = true
         handler.removeCallbacks(sampler)
         samplerScheduled = false
+        saveState()
         updateScannerUi()
     }
 
     private fun startScanning() {
         stoppedManually = false
+        saveState()
         ensureSamplerState()
         updateScannerUi()
     }
@@ -603,12 +593,6 @@ class MainActivity : Activity() {
         val effectiveStatus = currentScannerStatus()
 
         statusText?.text = effectiveStatus
-        sessionSampleText?.text = resources.getQuantityString(
-            R.plurals.samples_this_session,
-            sampleCount,
-            sampleCount,
-        )
-        sessionSampleText?.visibility = if (canSample()) View.VISIBLE else View.INVISIBLE
         titleSignalIcon?.setQuality(
             quality = if (canSample()) latestTelemetry.overallQuality() else 0f,
             animate = sampleCount > 0,
@@ -676,6 +660,7 @@ class MainActivity : Activity() {
             ReportingScheduler.KEY_CONSENT_GRANTED,
             legacyPreferences.getBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, false),
         )
+        stoppedManually = preferences.getBoolean(KEY_SCANNER_STOPPED, false)
         frequency = SamplingFrequency.fromName(
             preferences.getString(KEY_FREQUENCY, SamplingFrequency.Balanced.name),
         )
@@ -691,6 +676,7 @@ class MainActivity : Activity() {
     private fun saveState() {
         ReportingScheduler.appPreferences(this).edit()
             .putBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, consentGranted)
+            .putBoolean(KEY_SCANNER_STOPPED, stoppedManually)
             .putString(KEY_FREQUENCY, frequency.name)
             .putString(KEY_GNSS_MODE, gnssMode.name)
             .putString(ReportingScheduler.KEY_REPORTING_MODE, reportingMode.name)
@@ -788,13 +774,6 @@ class MainActivity : Activity() {
 
     private fun scannerStatusText(): TextView = TextView(this).apply {
         textSize = 18f
-        setTextColor(SCANNER_SOFT_TEXT)
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-    }
-
-    private fun scannerSessionSampleText(): TextView = TextView(this).apply {
-        textSize = 12f
         setTextColor(SCANNER_SOFT_TEXT)
         gravity = Gravity.CENTER
         includeFontPadding = false
@@ -1731,6 +1710,7 @@ class MainActivity : Activity() {
     private companion object {
         const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
+        const val KEY_SCANNER_STOPPED = "scannerStopped"
         const val KEY_FREQUENCY = "frequency"
         const val KEY_GNSS_MODE = "gnssMode"
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)

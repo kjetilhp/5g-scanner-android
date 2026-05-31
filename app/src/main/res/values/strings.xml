@@ -53,10 +53,6 @@
     <string name="delete_all_logs_confirm_action">Delete</string>
     <string name="setting_participation_title">Participation</string>
     <string name="setting_participation_summary">Scanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
-    <plurals name="samples_this_session">
-        <item quantity="one">%1$d sample this session</item>
-        <item quantity="other">%1$d samples this session</item>
-    </plurals>
     <plurals name="log_files_summary">
         <item quantity="one">%1$d file, %2$s total</item>
         <item quantity="other">%1$d files, %2$s total</item>
