@@ -34,6 +34,7 @@ import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.random.Random
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -44,7 +45,6 @@ class MainActivity : Activity() {
 
     private var consentGranted = false
     private var stoppedManually = false
-    private var stoppedUntil: Instant? = null
     private var showingSettings = false
     private var settingsDestination = SettingsDestination.Main
     private var selectedLogFile: CoverageLogStore.LogFile? = null
@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private var telemetryBars: TelemetryBarsView? = null
     private var titleSignalIcon: SignalQualityIconView? = null
     private var stopStartButton: ImageButton? = null
+    private var sleepIndicator: SleepIndicatorView? = null
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
@@ -199,7 +200,7 @@ class MainActivity : Activity() {
 
         stopStartButton = scannerIconButton(R.drawable.ic_stop_32, getString(R.string.stop_scanning), dp(56)) {
             if (!isStopped()) {
-                showStopDialog()
+                stopScanning()
             } else {
                 startScanning()
             }
@@ -208,6 +209,7 @@ class MainActivity : Activity() {
         statusText = scannerStatusText()
         sessionSampleText = scannerSessionSampleText()
         scannerActivityRing = ScannerActivityRing()
+        sleepIndicator = SleepIndicatorView()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
             settingsDestination = SettingsDestination.Main
@@ -233,6 +235,9 @@ class MainActivity : Activity() {
             })
             addView(stopStartButton, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin
+            })
+            addView(sleepIndicator, FrameLayout.LayoutParams(dp(188), dp(188), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = controlBottomMargin - dp(38)
             })
             addView(sessionSampleText, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -475,6 +480,8 @@ class MainActivity : Activity() {
         telemetryBars = null
         titleSignalIcon = null
         stopStartButton = null
+        sleepIndicator?.stop()
+        sleepIndicator = null
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
         scannerActivityRing = null
@@ -543,42 +550,21 @@ class MainActivity : Activity() {
             .toString()
     }
 
-    private fun showStopDialog() {
-        val options = arrayOf(
-            getString(R.string.stop_until_i_start),
-            getString(R.string.stop_15_minutes),
-            getString(R.string.stop_1_hour),
-        )
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.stop_scanning_title))
-            .setItems(options) { _, which ->
-                stoppedUntil = when (which) {
-                    0 -> null
-                    1 -> Instant.now().plusSeconds(15 * 60)
-                    else -> Instant.now().plusSeconds(60 * 60)
-                }
-                stoppedManually = which == 0
-                handler.removeCallbacks(sampler)
-                samplerScheduled = false
-                updateScannerUi()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+    private fun stopScanning() {
+        stoppedManually = true
+        handler.removeCallbacks(sampler)
+        samplerScheduled = false
+        updateScannerUi()
     }
 
     private fun startScanning() {
         stoppedManually = false
-        stoppedUntil = null
         ensureSamplerState()
         updateScannerUi()
     }
 
     private fun canSample(): Boolean {
-        val stop = stoppedUntil
-        if (stop != null && Instant.now().isAfter(stop)) {
-            stoppedUntil = null
-        }
-        return consentGranted && !stoppedManually && stoppedUntil == null
+        return consentGranted && !stoppedManually
     }
 
     private fun ensureSamplerState() {
@@ -623,9 +609,15 @@ class MainActivity : Activity() {
             sampleCount,
         )
         sessionSampleText?.visibility = if (canSample()) View.VISIBLE else View.INVISIBLE
-        titleSignalIcon?.setQuality(latestTelemetry.overallQuality(), animate = sampleCount > 0)
+        titleSignalIcon?.setQuality(
+            quality = if (canSample()) latestTelemetry.overallQuality() else 0f,
+            animate = sampleCount > 0,
+        )
         if (!canSample()) {
             telemetryBars?.showNoData()
+            sleepIndicator?.start()
+        } else {
+            sleepIndicator?.stop()
         }
         stopStartButton?.apply {
             if (isStopped()) {
@@ -640,10 +632,8 @@ class MainActivity : Activity() {
     }
 
     private fun currentScannerStatus(): String {
-        val stop = stoppedUntil
         return when {
             stoppedManually -> getString(R.string.status_stopped_manual)
-            stop != null -> getString(R.string.status_stopped_until, clockFormatter.format(stop))
             else -> getString(R.string.status_scanning)
         }
     }
@@ -677,7 +667,7 @@ class MainActivity : Activity() {
         return String.format("%.1f %s", value, units[unitIndex])
     }
 
-    private fun isStopped(): Boolean = stoppedManually || stoppedUntil != null
+    private fun isStopped(): Boolean = stoppedManually
 
     private fun loadState() {
         val preferences = ReportingScheduler.appPreferences(this)
@@ -1207,6 +1197,98 @@ class MainActivity : Activity() {
         }
     }
 
+    private inner class SleepIndicatorView : View(this@MainActivity) {
+        private var animator: ValueAnimator? = null
+        private val random = Random(System.nanoTime())
+        private val specs = MutableList(5) { randomSleepSpec() }
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textAlign = Paint.Align.CENTER
+        }
+
+        init {
+            visibility = View.INVISIBLE
+        }
+
+        fun start() {
+            visibility = View.VISIBLE
+            if (animator?.isStarted == true) return
+            animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 16_000L
+                interpolator = LinearInterpolator()
+                repeatCount = ValueAnimator.INFINITE
+                addUpdateListener {
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        fun stop() {
+            animator?.cancel()
+            animator = null
+            visibility = View.INVISIBLE
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val now = System.currentTimeMillis()
+            specs.forEachIndexed { index, spec ->
+                val age = now - spec.startedAtMs
+                val phase = age.toFloat() / spec.durationMs.toFloat()
+                if (phase >= 1f) {
+                    specs[index] = randomSleepSpec(now)
+                    return@forEachIndexed
+                }
+
+                val alpha = (255 * (1f - phase)).toInt().coerceIn(0, 255)
+                val size = dp(spec.size).toFloat()
+                val x = width * (spec.x + spec.driftX * phase)
+                val y = height * (spec.y + spec.driftY * phase)
+                paint.alpha = alpha
+                paint.textSize = size
+                canvas.drawText("z", x, y, paint)
+            }
+            paint.alpha = 255
+        }
+
+        private fun randomSleepSpec(startedAtMs: Long = System.currentTimeMillis()): SleepSpec {
+            val angle = randomSleepAngle()
+            val radius = random.nextFloatIn(0.36f, 0.44f)
+            val x = 0.5f + kotlin.math.cos(angle) * radius
+            val y = 0.5f + kotlin.math.sin(angle) * radius
+            val outwardX = kotlin.math.cos(angle) * random.nextFloatIn(0.03f, 0.08f)
+            val upwardBias = -random.nextFloatIn(0.03f, 0.09f)
+            return SleepSpec(
+                x = x.coerceIn(0.08f, 0.92f),
+                y = y.coerceIn(0.08f, 0.92f),
+                driftX = outwardX,
+                driftY = upwardBias + kotlin.math.sin(angle) * random.nextFloatIn(0.01f, 0.04f),
+                size = random.nextInt(19, 27),
+                durationMs = random.nextLong(1_700L, 2_900L),
+                startedAtMs = startedAtMs - random.nextLong(0L, 1_300L),
+            )
+        }
+
+        private fun randomSleepAngle(): Float =
+            if (random.nextBoolean()) {
+                random.nextFloatIn(0f, (Math.PI * 7f / 6f).toFloat())
+            } else {
+                random.nextFloatIn((Math.PI * 11f / 6f).toFloat(), (Math.PI * 2f).toFloat())
+            }
+    }
+
+    private data class SleepSpec(
+        val x: Float,
+        val y: Float,
+        val driftX: Float,
+        val driftY: Float,
+        val size: Int,
+        val durationMs: Long,
+        val startedAtMs: Long,
+    )
+
     private inner class TelemetryBarsView : View(this@MainActivity) {
         private var metrics: List<MetricQuality> = emptyList()
         private var showNoData = false
@@ -1259,7 +1341,7 @@ class MainActivity : Activity() {
 
         init {
             background = roundedBackground(SCANNER_PANEL, dp(8))
-            contentDescription = getString(R.string.no_samples_yet)
+            contentDescription = getString(R.string.no_data)
         }
 
         fun setMetrics(metrics: List<MetricQuality>, animate: Boolean) {
@@ -1593,6 +1675,9 @@ class MainActivity : Activity() {
             (Color.blue(start) * inverse + Color.blue(end) * fraction).toInt(),
         )
     }
+
+    private fun Random.nextFloatIn(start: Float, end: Float): Float =
+        start + nextFloat() * (end - start)
 
     private enum class SamplingFrequency(val label: String, val intervalMs: Long) {
         LowImpact("Low impact", 60_000),
