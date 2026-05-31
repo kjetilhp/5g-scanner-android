@@ -1,0 +1,198 @@
+package no.politiet.pit
+
+import android.content.ContentResolver
+import android.content.ContentValues
+import android.content.Context
+import android.database.Cursor
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import java.io.File
+import java.io.FileWriter
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+
+class CoverageLogStore(private val context: Context) {
+    private val dayFormatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC)
+
+    data class LogFile(
+        val name: String,
+        val sizeBytes: Long,
+        val modifiedAtMillis: Long,
+        val uri: Uri?,
+        val file: File?,
+    )
+
+    data class LogStats(
+        val fileCount: Int,
+        val totalBytes: Long,
+    )
+
+    fun append(sampleJson: String, capturedAt: Instant): String {
+        val fileName = "coverage-${dayFormatter.format(capturedAt)}.jsonl"
+        val line = if (sampleJson.endsWith("\n")) sampleJson else "$sampleJson\n"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appendWithMediaStore(fileName, line)
+            return "Documents/Ask/$fileName"
+        }
+
+        val file = appendWithExternalFile(fileName, line)
+        return file.absolutePath
+    }
+
+    fun displayDirectory(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "Documents/Ask"
+        } else {
+            publicLogDirectory().absolutePath
+        }
+
+    fun stats(): LogStats {
+        val logs = listLogs()
+        return LogStats(
+            fileCount = logs.size,
+            totalBytes = logs.sumOf { it.sizeBytes },
+        )
+    }
+
+    fun listLogs(): List<LogFile> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            listMediaStoreLogs()
+        } else {
+            listExternalFileLogs()
+        }.sortedWith(
+            compareByDescending<LogFile> { dateKey(it.name) }
+                .thenByDescending { it.modifiedAtMillis }
+                .thenBy { it.name },
+        )
+
+    fun read(logFile: LogFile): String {
+        val bytes = when {
+            logFile.uri != null -> context.contentResolver.openInputStream(logFile.uri)?.use { input ->
+                input.readBytes()
+            }
+            logFile.file != null && logFile.file.exists() -> logFile.file.readBytes()
+            else -> null
+        }
+        return bytes?.toString(Charsets.UTF_8).orEmpty()
+    }
+
+    fun deleteAllLogs(): Int =
+        listLogs().count { logFile ->
+            when {
+                logFile.uri != null -> context.contentResolver.delete(logFile.uri, null, null) > 0
+                logFile.file != null -> logFile.file.delete()
+                else -> false
+            }
+        }
+
+    private fun appendWithMediaStore(fileName: String, line: String) {
+        val resolver = context.contentResolver
+        val uri = findMediaStoreFile(resolver, fileName) ?: createMediaStoreFile(resolver, fileName)
+        resolver.openOutputStream(uri, "wa")?.use { output ->
+            output.write(line.toByteArray(Charsets.UTF_8))
+        } ?: error("Could not open coverage log for writing: $fileName")
+    }
+
+    private fun findMediaStoreFile(resolver: ContentResolver, fileName: String): Uri? {
+        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val relativePath = "${Environment.DIRECTORY_DOCUMENTS}/Ask/"
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+        val args = arrayOf(fileName, relativePath)
+
+        resolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                return Uri.withAppendedPath(collection, id.toString())
+            }
+        }
+        return null
+    }
+
+    private fun createMediaStoreFile(resolver: ContentResolver, fileName: String): Uri {
+        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/x-ndjson")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOCUMENTS}/Ask/")
+        }
+        return resolver.insert(collection, values)
+            ?: error("Could not create coverage log: $fileName")
+    }
+
+    private fun appendWithExternalFile(fileName: String, line: String): File {
+        val publicDir = publicLogDirectory()
+        val dir = if (publicDir.mkdirs() || publicDir.isDirectory) {
+            publicDir
+        } else {
+            File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Ask").apply {
+                mkdirs()
+            }
+        }
+        val file = File(dir, fileName)
+        FileWriter(file, true).use { writer ->
+            writer.write(line)
+        }
+        return file
+    }
+
+    private fun listMediaStoreLogs(): List<LogFile> {
+        val resolver = context.contentResolver
+        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+        )
+        val relativePath = "${Environment.DIRECTORY_DOCUMENTS}/Ask/"
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        val args = arrayOf(relativePath, "coverage-%.jsonl")
+
+        return resolver.query(collection, projection, selection, args, null)?.use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(cursor.toLogFile(collection))
+                }
+            }
+        }.orEmpty()
+    }
+
+    private fun Cursor.toLogFile(collection: Uri): LogFile {
+        val id = getLong(getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+        val name = getString(getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME))
+        val size = getLong(getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+        val modifiedSeconds = getLong(getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED))
+        return LogFile(
+            name = name,
+            sizeBytes = size,
+            modifiedAtMillis = modifiedSeconds * 1000L,
+            uri = Uri.withAppendedPath(collection, id.toString()),
+            file = null,
+        )
+    }
+
+    private fun listExternalFileLogs(): List<LogFile> =
+        publicLogDirectory()
+            .listFiles { file -> file.isFile && file.name.startsWith("coverage-") && file.name.endsWith(".jsonl") }
+            .orEmpty()
+            .map { file ->
+                LogFile(
+                    name = file.name,
+                    sizeBytes = file.length(),
+                    modifiedAtMillis = file.lastModified(),
+                    uri = null,
+                    file = file,
+                )
+            }
+
+    private fun dateKey(name: String): String =
+        name.removePrefix("coverage-").removeSuffix(".jsonl")
+
+    private fun publicLogDirectory(): File =
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Ask")
+}

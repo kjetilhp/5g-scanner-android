@@ -60,6 +60,8 @@ Start scanner work automatically when the effective state allows it:
 
 Initial versions should assume local logging only. Upload/sync behavior is intentionally deferred and must require a later explicit product/privacy decision before implementation.
 
+The current prototype writes mock samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes a coverage logs view for listing files, opening raw JSONL, and deleting all local coverage logs after confirmation.
+
 ## Product Notes
 
 Keep the first usable UI small:

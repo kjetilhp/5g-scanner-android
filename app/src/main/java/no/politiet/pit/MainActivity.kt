@@ -17,17 +17,20 @@ import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -43,6 +46,8 @@ class MainActivity : Activity() {
     private var stoppedManually = false
     private var stoppedUntil: Instant? = null
     private var showingSettings = false
+    private var settingsDestination = SettingsDestination.Main
+    private var selectedLogFile: CoverageLogStore.LogFile? = null
     private var sampleCount = 0
     private var lastSampleAt: Instant? = null
     private var frequency = SamplingFrequency.Balanced
@@ -59,6 +64,7 @@ class MainActivity : Activity() {
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
     private var samplerScheduled = false
+    private lateinit var coverageLogStore: CoverageLogStore
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -74,6 +80,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        coverageLogStore = CoverageLogStore(this)
         loadState()
         saveState()
         render()
@@ -86,10 +93,36 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        when {
+            showingSettings && settingsDestination == SettingsDestination.LogFile -> {
+                settingsDestination = SettingsDestination.LogList
+                selectedLogFile = null
+                render()
+            }
+            showingSettings && settingsDestination == SettingsDestination.LogList -> {
+                settingsDestination = SettingsDestination.Main
+                render()
+            }
+            showingSettings -> {
+                showingSettings = false
+                settingsDestination = SettingsDestination.Main
+                selectedLogFile = null
+                render()
+            }
+            else -> super.onBackPressed()
+        }
+    }
+
     private fun render() {
         setContentView(when {
             !consentGranted -> createConsentView()
-            showingSettings -> createSettingsView()
+            showingSettings -> when (settingsDestination) {
+                SettingsDestination.Main -> createSettingsView()
+                SettingsDestination.LogList -> createLogListView()
+                SettingsDestination.LogFile -> createLogFileView()
+            }
             else -> createScannerView()
         })
         if (consentGranted) {
@@ -177,6 +210,8 @@ class MainActivity : Activity() {
         scannerActivityRing = ScannerActivityRing()
         val settingsButton = scannerIconButton(R.drawable.ic_settings_24, getString(R.string.open_settings), dp(28)) {
             showingSettings = true
+            settingsDestination = SettingsDestination.Main
+            selectedLogFile = null
             render()
         }
 
@@ -266,11 +301,26 @@ class MainActivity : Activity() {
         content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
         content.addView(settingsGroup(*reportingRows.toTypedArray()))
 
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_logs)))
+        content.addView(settingsGroup(
+            settingsPreferenceRow(
+                title = getString(R.string.setting_view_logs_title),
+                summary = logStatsSummary(),
+                value = "",
+            ) {
+                settingsDestination = SettingsDestination.LogList
+                render()
+            },
+        ))
+
         content.addView(settingsSectionLabel(getString(R.string.settings_section_privacy)))
         content.addView(settingsGroup(
             settingsInfoRow(
                 title = getString(R.string.setting_storage_title),
-                summary = getString(R.string.setting_storage_summary),
+                summary = getString(
+                    R.string.setting_storage_summary,
+                    coverageLogStore.displayDirectory(),
+                ),
             ),
             settingsInfoRow(
                 title = getString(R.string.setting_participation_title),
@@ -299,6 +349,126 @@ class MainActivity : Activity() {
         return root
     }
 
+    private fun createLogListView(): View {
+        clearScannerViews()
+        val logs = coverageLogStore.listLogs()
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(32))
+        }
+
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_logs)))
+        if (logs.isEmpty()) {
+            content.addView(settingsGroup(
+                settingsInfoRow(
+                    title = getString(R.string.log_files_empty_title),
+                    summary = getString(R.string.log_files_empty_summary, coverageLogStore.displayDirectory()),
+                ),
+            ))
+        } else {
+            val rows = logs.map { logFile ->
+                settingsActionRow(
+                    title = logFile.name,
+                    summary = getString(
+                        R.string.log_file_summary,
+                        formatBytes(logFile.sizeBytes),
+                        dateTimeFormatter.format(Instant.ofEpochMilli(logFile.modifiedAtMillis)),
+                    ),
+                ) {
+                    selectedLogFile = logFile
+                    settingsDestination = SettingsDestination.LogFile
+                    render()
+                }
+            }
+            content.addView(settingsGroup(*rows.toTypedArray()))
+            content.addView(settingsSectionLabel(getString(R.string.coverage_logs_actions_section)))
+            content.addView(settingsGroup(
+                settingsDestructiveActionRow(
+                    title = getString(R.string.delete_all_logs_title),
+                    summary = getString(R.string.delete_all_logs_summary),
+                ) {
+                    confirmDeleteAllLogs()
+                },
+            ))
+        }
+
+        return settingsScreen(
+            title = getString(R.string.setting_view_logs_title),
+            backDescription = getString(R.string.back_to_settings),
+            onBack = {
+                settingsDestination = SettingsDestination.Main
+                render()
+            },
+            body = content,
+        )
+    }
+
+    private fun confirmDeleteAllLogs() {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.delete_all_logs_title))
+            .setMessage(getString(R.string.delete_all_logs_confirm_message))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(getString(R.string.delete_all_logs_confirm_action)) { _, _ ->
+                coverageLogStore.deleteAllLogs()
+                selectedLogFile = null
+                settingsDestination = SettingsDestination.LogList
+                render()
+            }
+            .show()
+    }
+
+    private fun createLogFileView(): View {
+        clearScannerViews()
+        val logFile = selectedLogFile
+        if (logFile == null) {
+            settingsDestination = SettingsDestination.LogList
+            return createLogListView()
+        }
+
+        val rawText = coverageLogStore.read(logFile)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(32))
+        }
+
+        content.addView(TextView(this).apply {
+            text = getString(R.string.log_file_raw_summary, formatBytes(logFile.sizeBytes))
+            textSize = 14f
+            setTextColor(SETTINGS_SUBTLE_TEXT)
+            includeFontPadding = false
+            setPadding(0, 0, 0, dp(12))
+        })
+
+        val rawTextView = TextView(this).apply {
+            text = rawText.ifBlank { getString(R.string.log_file_empty) }
+            textSize = 12f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(SETTINGS_TEXT)
+            setTextIsSelectable(true)
+            includeFontPadding = true
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        val horizontalScroller = HorizontalScrollView(this).apply {
+            addView(rawTextView)
+        }
+        content.addView(horizontalScroller, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
+
+        return settingsScreen(
+            title = logFile.name,
+            backDescription = getString(R.string.back_to_logs),
+            onBack = {
+                settingsDestination = SettingsDestination.LogList
+                selectedLogFile = null
+                render()
+            },
+            body = content,
+        )
+    }
+
     private fun clearScannerViews() {
         statusText = null
         sessionSampleText = null
@@ -312,11 +482,65 @@ class MainActivity : Activity() {
 
     private fun captureMockSample() {
         sampleCount += 1
-        lastSampleAt = Instant.now()
+        val capturedAt = Instant.now()
+        lastSampleAt = capturedAt
         latestTelemetry = MockTelemetry.fromSample(sampleCount, gnssMode)
+        writeMockSample(sampleCount, capturedAt, latestTelemetry)
         telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
         triggerContinuousReporting()
         updateScannerUi()
+    }
+
+    private fun writeMockSample(sampleNumber: Int, capturedAt: Instant, telemetry: MockTelemetry) {
+        runCatching {
+            coverageLogStore.append(
+                sampleJson = mockCoverageSampleJson(sampleNumber, capturedAt, telemetry),
+                capturedAt = capturedAt,
+            )
+        }.onFailure { error ->
+            Log.e(TAG, "Could not append coverage sample", error)
+        }
+    }
+
+    private fun mockCoverageSampleJson(
+        sampleNumber: Int,
+        capturedAt: Instant,
+        telemetry: MockTelemetry,
+    ): String {
+        val wave = sampleNumber % 24
+        val fix = JSONObject()
+            .put("timestamp", capturedAt.toString())
+            .put("gpsTime", JSONObject.NULL)
+            .put("lat", 59.9139 + wave * 0.00008)
+            .put("lon", 10.7522 + wave * 0.00011)
+            .put("altitude", 23.0 + (wave % 5))
+            .put("speed", if (telemetry.gnssMode == GnssMode.HighAccuracy) 1.6 else 0.8)
+            .put("heading", (sampleNumber * 17) % 360)
+            .put("hdop", telemetry.hdop.toDouble())
+            .put("satellites", if (telemetry.gnssMode == GnssMode.HighAccuracy) 18 else 11)
+
+        val signal = JSONObject()
+            .put("rsrp", telemetry.rsrp)
+            .put("rsrq", telemetry.rsrq)
+            .put("sinr", telemetry.sinr)
+            .put("rssi", telemetry.rsrp + 30)
+
+        val cell = JSONObject()
+            .put("rat", "LTE")
+            .put("mcc", 242)
+            .put("mnc", 1)
+            .put("cellId", "mock-${100000 + sampleNumber}")
+            .put("tac", 4100 + (sampleNumber % 12))
+            .put("pci", 120 + (sampleNumber % 48))
+            .put("earfcn", 6300 + (sampleNumber % 20))
+            .put("band", 20)
+            .put("signal", signal)
+
+        return JSONObject()
+            .put("kind", "serving")
+            .put("fix", fix)
+            .put("cell", cell)
+            .toString()
     }
 
     private fun showStopDialog() {
@@ -430,6 +654,28 @@ class MainActivity : Activity() {
             reportingMode.summary,
             lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
         )
+
+    private fun logStatsSummary(): String {
+        val stats = coverageLogStore.stats()
+        return resources.getQuantityString(
+            R.plurals.log_files_summary,
+            stats.fileCount,
+            stats.fileCount,
+            formatBytes(stats.totalBytes),
+        )
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024L) return "$bytes B"
+        val units = arrayOf("KB", "MB", "GB")
+        var value = bytes.toDouble() / 1024.0
+        var unitIndex = 0
+        while (value >= 1024.0 && unitIndex < units.lastIndex) {
+            value /= 1024.0
+            unitIndex += 1
+        }
+        return String.format("%.1f %s", value, units[unitIndex])
+    }
 
     private fun isStopped(): Boolean = stoppedManually || stoppedUntil != null
 
@@ -648,7 +894,36 @@ class MainActivity : Activity() {
             setOnClickListener { onClick() }
         }
 
-    private fun settingsToolbar(): LinearLayout =
+    private fun settingsScreen(
+        title: String,
+        backDescription: String,
+        onBack: () -> Unit,
+        body: View,
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(SETTINGS_BACKGROUND)
+            addView(settingsToolbar(title, backDescription, onBack))
+            addView(ScrollView(this@MainActivity).apply {
+                setBackgroundColor(SETTINGS_BACKGROUND)
+                addView(body)
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ))
+        }
+
+    private fun settingsToolbar(
+        title: String = getString(R.string.settings_title),
+        backDescription: String = getString(R.string.back_to_scanner),
+        onBack: () -> Unit = {
+            showingSettings = false
+            settingsDestination = SettingsDestination.Main
+            selectedLogFile = null
+            render()
+        },
+    ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -660,19 +935,17 @@ class MainActivity : Activity() {
                 setImageResource(R.drawable.ic_arrow_back_24)
                 setColorFilter(SETTINGS_TEXT)
                 scaleType = ImageView.ScaleType.CENTER
-                contentDescription = getString(R.string.back_to_scanner)
+                contentDescription = backDescription
                 background = rippleBackground(Color.TRANSPARENT, dp(24))
-                setOnClickListener {
-                    showingSettings = false
-                    render()
-                }
+                setOnClickListener { onBack() }
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
 
             addView(TextView(this@MainActivity).apply {
-                text = getString(R.string.settings_title)
+                text = title
                 textSize = 20f
                 setTextColor(SETTINGS_TEXT)
                 includeFontPadding = false
+                maxLines = 1
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
@@ -754,11 +1027,23 @@ class MainActivity : Activity() {
             addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
+    private fun settingsDestructiveActionRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
+        settingsRow(
+            title = title,
+            summary = summary,
+            value = null,
+            isClickable = true,
+            titleColor = SETTINGS_DESTRUCTIVE,
+        ).apply {
+            setOnClickListener { onClick() }
+        }
+
     private fun settingsRow(
         title: String,
         summary: String,
         value: String?,
         isClickable: Boolean,
+        titleColor: Int = SETTINGS_TEXT,
     ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -777,7 +1062,7 @@ class MainActivity : Activity() {
             textColumn.addView(TextView(this@MainActivity).apply {
                 this.text = title
                 textSize = 16f
-                setTextColor(SETTINGS_TEXT)
+                setTextColor(titleColor)
                 includeFontPadding = false
             })
             textColumn.addView(TextView(this@MainActivity).apply {
@@ -1352,7 +1637,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private enum class SettingsDestination {
+        Main,
+        LogList,
+        LogFile,
+    }
+
     private companion object {
+        const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
         const val KEY_FREQUENCY = "frequency"
         const val KEY_GNSS_MODE = "gnssMode"
@@ -1372,6 +1664,7 @@ class MainActivity : Activity() {
         val SETTINGS_TEXT: Int = Color.rgb(31, 41, 55)
         val SETTINGS_SUBTLE_TEXT: Int = Color.rgb(91, 103, 119)
         val SETTINGS_ACCENT: Int = Color.rgb(15, 118, 110)
+        val SETTINGS_DESTRUCTIVE: Int = Color.rgb(185, 28, 28)
         val SETTINGS_CHEVRON: Int = Color.rgb(148, 163, 184)
         val SETTINGS_DIVIDER: Int = Color.rgb(229, 232, 237)
         val SETTINGS_RIPPLE: Int = Color.argb(26, 15, 118, 110)

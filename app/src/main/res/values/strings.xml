@@ -6,7 +6,7 @@
     <string name="consent_data_scope_title">Data collected</string>
     <string name="consent_data_scope">When scanning is enabled, the app will collect location, timestamps, connectivity state, and cellular radio measurements where Android exposes them.</string>
     <string name="consent_storage_title">Storage and reporting</string>
-    <string name="consent_local_only">This prototype stores data locally only. Upload and sharing are not enabled.</string>
+    <string name="consent_local_only">This prototype stores daily JSONL logs locally under Documents/Ask. Upload and sharing are not enabled.</string>
     <string name="consent_control_title">Your control</string>
     <string name="consent_reversible">After consent, scanning starts automatically unless stopped. You can stop scanning later or uninstall the app to stop participating.</string>
     <string name="grant_consent">Grant consent</string>
@@ -29,10 +29,14 @@
     <string name="open_settings">Settings</string>
     <string name="settings_title">Settings</string>
     <string name="back_to_scanner">Back to scanner</string>
+    <string name="back_to_settings">Back to settings</string>
+    <string name="back_to_logs">Back to logs</string>
     <string name="settings_section_scanning">Scanning</string>
     <string name="settings_section_location">Location</string>
     <string name="settings_section_reporting">Reporting</string>
+    <string name="settings_section_logs">Coverage logs</string>
     <string name="settings_section_privacy">Privacy</string>
+    <string name="coverage_logs_actions_section">Actions</string>
     <string name="setting_sampling_frequency_title">Sampling frequency</string>
     <string name="setting_gnss_mode_title">GNSS mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
@@ -42,11 +46,25 @@
     <string name="setting_send_now_success_message">No-op send succeeded. Last sent has been updated.</string>
     <string name="setting_send_now_failed_message">No-op send failed. Check the network connection and try again.</string>
     <string name="setting_storage_title">Storage</string>
-    <string name="setting_storage_summary">Coverage samples are stored locally first. Server upload is not enabled in this prototype.</string>
+    <string name="setting_storage_summary">Coverage samples are stored locally first as daily JSONL files in %1$s. Server upload is not enabled in this prototype.</string>
+    <string name="setting_view_logs_title">View coverage logs</string>
+    <string name="log_files_empty_title">No log files</string>
+    <string name="log_files_empty_summary">Samples will appear here after scanning writes to %1$s.</string>
+    <string name="log_file_summary">%1$s, modified %2$s</string>
+    <string name="log_file_raw_summary">Raw JSONL, %1$s</string>
+    <string name="log_file_empty">This log file is empty.</string>
+    <string name="delete_all_logs_title">Delete all</string>
+    <string name="delete_all_logs_summary">Delete every coverage log stored on this device.</string>
+    <string name="delete_all_logs_confirm_message">Delete all coverage log files from this device? This cannot be undone.</string>
+    <string name="delete_all_logs_confirm_action">Delete</string>
     <string name="setting_participation_title">Participation</string>
     <string name="setting_participation_summary">Scanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
     <plurals name="samples_this_session">
         <item quantity="one">%1$d sample this session</item>
         <item quantity="other">%1$d samples this session</item>
+    </plurals>
+    <plurals name="log_files_summary">
+        <item quantity="one">%1$d file, %2$s total</item>
+        <item quantity="other">%1$d files, %2$s total</item>
     </plurals>
 </resources>

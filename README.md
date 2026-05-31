@@ -68,6 +68,7 @@ The emulator build currently uses mock telemetry. It supports:
 - Blocking first-run consent before scanner controls are shown
 - Grant app-level consent
 - Automatic mock scanning after consent
+- Daily JSONL log files written under `Documents/Ask/` on shared storage
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
 - Separate settings screen for sampling frequency and GNSS mode
@@ -99,6 +100,12 @@ The first target format is append-only JSON Lines:
 
 ```text
 one CoverageSample JSON object per line
+```
+
+The Android prototype currently writes mock samples to one file per UTC day:
+
+```text
+Documents/Ask/coverage-YYYY-MM-DD.jsonl
 ```
 
 See [docs/output-contract.md](docs/output-contract.md) for the current contract notes.
