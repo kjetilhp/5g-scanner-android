@@ -1,4 +1,4 @@
-package no.politiet.pit
+package no.politiet.pit.reporting
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -84,6 +84,14 @@ object ReportingScheduler {
         }.start()
     }
 
+    fun recordTriggerFromPreferences(
+        context: Context,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
+        val reportingMode = appPreferences(context).getString(KEY_REPORTING_MODE, MODE_HOURLY) ?: MODE_HOURLY
+        recordTrigger(context, reportingMode, onComplete)
+    }
+
     fun lastReportedAt(context: Context): Instant? =
         appPreferences(context).getString(KEY_LAST_REPORTED_AT, null)?.let(Instant::parse)
 
@@ -134,9 +142,8 @@ class ReportingAlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        val reportingMode = preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, "Hourly") ?: "Hourly"
         val pendingResult = goAsync()
-        ReportingScheduler.recordTrigger(context, reportingMode) {
+        ReportingScheduler.recordTriggerFromPreferences(context) {
             pendingResult.finish()
         }
     }

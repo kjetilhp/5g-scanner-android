@@ -22,6 +22,20 @@ external/   Reference projects such as node-scanner
 
 The first checked-in Android skeleton contains only `app/` and a simple native `MainActivity`. Add `core/`, `telemetry/`, and `storage/` when there is enough real scanner code to justify separating modules.
 
+## Current Android Package Shape
+
+The prototype still uses a single Gradle `app` module, but code inside `no.politiet.pit` is split by responsibility:
+
+```text
+domain/     Plain Kotlin modes and future scanner contract models
+encoding/   JSONL/sample encoders that can be tested away from Android UI
+telemetry/  Mock telemetry and future Android collector-facing models
+storage/    App preferences and coverage log persistence
+reporting/  Alarm receivers and reporting scheduler
+```
+
+`MainActivity` should keep shrinking toward lifecycle, navigation, and view rendering. Scanner state transitions, contract encoding, collectors, persistence, and reporting should live outside the Activity unless they are directly tied to Android view lifecycle.
+
 ## Android Collection Notes
 
 Likely APIs:

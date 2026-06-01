@@ -1,4 +1,4 @@
-package no.politiet.pit
+package no.politiet.pit.storage
 
 import android.content.ContentResolver
 import android.content.ContentValues
@@ -98,23 +98,28 @@ class CoverageLogStore(private val context: Context) {
     }
 
     private fun findMediaStoreFile(resolver: ContentResolver, fileName: String): Uri? {
-        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val projection = arrayOf(MediaStore.MediaColumns._ID)
-        val relativePath = "${Environment.DIRECTORY_DOCUMENTS}/Ask/"
-        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
-        val args = arrayOf(fileName, relativePath)
+        val collection = mediaStoreCollection()
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+        )
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=?"
+        val args = arrayOf(fileName)
 
         resolver.query(collection, projection, selection, args, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-                return Uri.withAppendedPath(collection, id.toString())
+            while (cursor.moveToNext()) {
+                if (cursor.isAskCoverageLog()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return Uri.withAppendedPath(collection, id.toString())
+                }
             }
         }
         return null
     }
 
     private fun createMediaStoreFile(resolver: ContentResolver, fileName: String): Uri {
-        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val collection = mediaStoreCollection()
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/x-ndjson")
@@ -142,24 +147,36 @@ class CoverageLogStore(private val context: Context) {
 
     private fun listMediaStoreLogs(): List<LogFile> {
         val resolver = context.contentResolver
-        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        return queryMediaStoreLogs(resolver)
+    }
+
+    private fun queryMediaStoreLogs(resolver: ContentResolver): List<LogFile> {
+        val collection = mediaStoreCollection()
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_MODIFIED,
         )
-        val relativePath = "${Environment.DIRECTORY_DOCUMENTS}/Ask/"
-        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        val args = arrayOf(relativePath, "coverage-%.jsonl")
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        val args = arrayOf("coverage-%.jsonl%")
 
         return resolver.query(collection, projection, selection, args, null)?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add(cursor.toLogFile(collection))
+                    val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME))
+                    if (cursor.isAskCoverageLog() && isCoverageLogName(name)) {
+                        add(cursor.toLogFile(collection))
+                    }
                 }
             }
         }.orEmpty()
+    }
+
+    private fun Cursor.isAskCoverageLog(): Boolean {
+        val relativePath = getString(getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH))
+        return relativePath == "${Environment.DIRECTORY_DOCUMENTS}/Ask/"
     }
 
     private fun Cursor.toLogFile(collection: Uri): LogFile {
@@ -178,7 +195,7 @@ class CoverageLogStore(private val context: Context) {
 
     private fun listExternalFileLogs(): List<LogFile> =
         publicLogDirectory()
-            .listFiles { file -> file.isFile && file.name.startsWith("coverage-") && file.name.endsWith(".jsonl") }
+            .listFiles { file -> file.isFile && isCoverageLogName(file.name) }
             .orEmpty()
             .map { file ->
                 LogFile(
@@ -190,9 +207,15 @@ class CoverageLogStore(private val context: Context) {
                 )
             }
 
+    private fun isCoverageLogName(name: String): Boolean =
+        name.startsWith("coverage-") && name.endsWith(".jsonl")
+
     private fun dateKey(name: String): String =
         name.removePrefix("coverage-").removeSuffix(".jsonl")
 
     private fun publicLogDirectory(): File =
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Ask")
+
+    private fun mediaStoreCollection(): Uri =
+        MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
 }

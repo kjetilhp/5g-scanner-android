@@ -25,10 +25,10 @@
             </intent-filter>
         </activity>
         <receiver
-            android:name=".ReportingAlarmReceiver"
+            android:name=".reporting.ReportingAlarmReceiver"
             android:exported="false" />
         <receiver
-            android:name=".ReportingBootReceiver"
+            android:name=".reporting.ReportingBootReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
