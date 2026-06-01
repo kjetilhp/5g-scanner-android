@@ -1409,7 +1409,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             waves.forEachIndexed { index, wave ->
                 wavePath.reset()
                 val centerY = height * wave.y
-                val amplitude = height * wave.amplitude * (0.82f + activity * 0.22f)
+                val amplitudePulse = 0.68f +
+                    kotlin.math.sin((seconds * wave.amplitudeSpeed + wave.phase) * Math.PI.toFloat() * 2f) * 0.2f +
+                    kotlin.math.sin((seconds * wave.amplitudeSpeed * 0.37f + wave.phase * 1.7f) * Math.PI.toFloat() * 2f) * 0.12f
+                val amplitude = height * wave.amplitude * amplitudePulse.coerceIn(0.42f, 1.08f) * (0.82f + activity * 0.22f)
                 val step = maxOf(8f, width / 72f)
                 var x = -step
                 while (x <= width + step) {
@@ -1580,6 +1583,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     amplitude = random.nextFloatIn(0.012f, 0.032f),
                     frequency = random.nextFloatIn(1.4f, 3.6f),
                     speed = random.nextFloatIn(0.025f, 0.085f) * if (random.nextBoolean()) 1f else -1f,
+                    amplitudeSpeed = random.nextFloatIn(0.08f, 0.22f),
                     phase = random.nextFloatIn(0f, 1f),
                     alpha = random.nextFloatIn(0.62f, 1f),
                 )
@@ -1633,6 +1637,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val amplitude: Float,
         val frequency: Float,
         val speed: Float,
+        val amplitudeSpeed: Float,
         val phase: Float,
         val alpha: Float,
     )
