@@ -67,6 +67,8 @@ Initial versions should assume local-first logging. Reporting/upload behavior mu
 
 The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources and writes accepted samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes reporting controls, a coverage logs view for listing files, in-app CSV preview/share export, and deleting all local coverage logs after confirmation.
 
+Telemetry source selection goes through `TelemetrySourceFactory`. The About screen includes a Developer `Mock telemetry` toggle that defaults on for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. Turning it off on a physical device should route through Android collector classes; keep those classes behind the same `RadioTelemetrySource` and `GnssTelemetrySource` interfaces. The scanner UI should indicate active mock telemetry with a subtle `MOCK` badge.
+
 ## Product Notes
 
 Keep the first usable UI small:

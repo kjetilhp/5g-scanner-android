@@ -126,6 +126,8 @@ Mock radio/GNSS sources are active for emulator development. Android radio/GNSS 
 
 Active scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
 
+The About screen includes a small Developer section with a `Mock telemetry` toggle. It defaults to enabled so emulator development keeps using simulator-friendly radio/GNSS samples. Emulators always force mock telemetry even if the saved toggle is off. Turning it off on a physical device routes the scanner through the Android source classes; those are still placeholders until the real public API collectors are implemented. The main scanner screen shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
+
 ## Location Mode and Quality
 
 Location mode controls how aggressively the future Android GNSS/location source should request fixes. It does not lower the quality bar for coverage logs.

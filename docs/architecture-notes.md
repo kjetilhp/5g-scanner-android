@@ -53,6 +53,8 @@ Cellular data should be treated as partial and device-dependent. The app should 
 
 Scanner sampling should keep GNSS and radio collection separate. Radio events or ticks should be paired with the latest acceptable GNSS fix by an assembler layer, then encoded to the shared JSONL contract. The active emulator path uses `MockRadioTelemetrySource` and `MockGnssTelemetrySource`; future physical-device work should implement the same interfaces with Android public APIs.
 
+Telemetry source selection is centralized in `TelemetrySourceFactory`. The app has a Developer setting named `Mock telemetry`, persisted in app preferences and shown under About. Mock telemetry defaults to enabled for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle so the Android collector placeholders are not accidentally exercised there. When disabled on a physical device, the scanner service routes through `AndroidRadioTelemetrySource` and `AndroidGnssTelemetrySource`; those classes currently remain placeholders returning no telemetry until real collectors are implemented. The main scanner UI shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
+
 The scanner loop is a foreground service. While scanning is active, `ScannerService` owns radio ticks, GNSS refreshes, sample assembly, JSONL writes, and continuous reporting triggers. The main UI observes an in-process state snapshot and receives service-state broadcasts while visible; the UI's own GNSS timer only updates the displayed `Ys ago` age and does not collect location. Stopping scanning stops the service and removes its foreground notification.
 
 ### Scanner Resilience Target

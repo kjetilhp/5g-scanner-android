@@ -30,6 +30,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.util.Log
 import android.net.Uri
 import android.view.Gravity
@@ -40,6 +45,7 @@ import android.view.animation.LinearInterpolator
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
@@ -79,6 +85,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var sampleCount = 0
     private var gnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
+    private var mockTelemetryEnabled = true
     private var lastReportedAt: Instant? = null
     private val mobileOperatorLookup: MobileOperatorLookup by lazy {
         MobileOperatorLookup.fromRawResource(this, R.raw.mobile_operators)
@@ -169,8 +176,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             syncScannerStateFromService(animateBars = true)
             if (!showingSettings) {
                 updateScannerUi()
+                scheduleSettingsRefresh()
             }
-            scheduleSettingsRefresh()
         }
     }
 
@@ -748,6 +755,25 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 packageName,
             ),
         ))
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_developer)))
+        content.addView(settingsGroup(
+            settingsToggleRow(
+                title = getString(R.string.setting_mock_telemetry_title),
+                summary = if (DeviceProfile.isLikelyEmulator()) {
+                    getString(R.string.setting_mock_telemetry_emulator_summary)
+                } else {
+                    getString(R.string.setting_mock_telemetry_summary)
+                },
+                isChecked = mockTelemetryEnabled || DeviceProfile.isLikelyEmulator(),
+                isEnabled = !DeviceProfile.isLikelyEmulator(),
+            ) { enabled ->
+                mockTelemetryEnabled = enabled
+                Log.d(TAG, "Mock telemetry changed: enabled=$mockTelemetryEnabled")
+                saveState()
+                ensureSamplerState()
+                render()
+            },
+        ))
 
         return settingsScreen(
             title = getString(R.string.setting_about_title),
@@ -832,7 +858,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             Log.d(TAG, "Scanner service disabled: consentGranted=$consentGranted, scannerStopped=$stoppedManually")
             return
         }
-        if (canStartForegroundScannerService()) {
+        if (canStartForegroundScannerService() && !ScannerService.currentState.isRunning) {
             ScannerService.start(this)
         }
         scheduleGnssAgeTick()
@@ -1152,9 +1178,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         stoppedManually = settings.scannerStopped
         gnssMode = settings.gnssMode
         reportingMode = settings.reportingMode
+        mockTelemetryEnabled = settings.mockTelemetryEnabled
         lastReportedAt = settings.lastReportedAt
         latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
-        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, lastReportedAt=$lastReportedAt")
+        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportedAt=$lastReportedAt")
     }
 
     private fun saveState() {
@@ -1163,8 +1190,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             scannerStopped = stoppedManually,
             gnssMode = gnssMode,
             reportingMode = reportingMode,
+            mockTelemetryEnabled = mockTelemetryEnabled,
         )
-        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
+        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled")
     }
 
     private fun logAppliedSettingsOnLaunch() {
@@ -1172,7 +1200,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         Log.i(
             TAG,
-            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageLogDirectory=${coverageLogStore.displayDirectory()}",
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageLogDirectory=${coverageLogStore.displayDirectory()}",
         )
     }
 
@@ -1273,9 +1301,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             background = roundedBackground(SCANNER_PANEL, dp(8))
         }
 
-    private fun servingCellSummary(cell: Cell): String {
+    private fun servingCellSummary(cell: Cell): CharSequence {
         val operator = mobileOperatorLookup.displayNameFor(cell.mcc, cell.mnc)
-        return getString(R.string.serving_cell_summary, cell.rat, cell.band, RadioFrequencyFormatter.displayText(cell), operator)
+        val summary = getString(R.string.serving_cell_summary, cell.rat, cell.band, RadioFrequencyFormatter.displayText(cell), operator)
+        if (!ScannerService.currentState.mockTelemetryActive) return summary
+
+        return SpannableString("MOCK  $summary").apply {
+            setSpan(RelativeSizeSpan(0.72f), 0, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(StyleSpan(android.graphics.Typeface.BOLD), 0, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(Color.argb(150, 255, 255, 255)), 0, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
     private fun headerSettingsButton(): ImageButton =
@@ -1470,6 +1505,32 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     ): LinearLayout =
         settingsRow(title, summary, value = null, isClickable = true, titleColor = titleColor).apply {
             setOnClickListener { onClick() }
+        }
+
+    private fun settingsToggleRow(
+        title: String,
+        summary: String,
+        isChecked: Boolean,
+        isEnabled: Boolean = true,
+        onCheckedChanged: (Boolean) -> Unit,
+    ): LinearLayout =
+        settingsRow(title, summary, value = null, isClickable = isEnabled).apply {
+            this.isEnabled = isEnabled
+            alpha = if (isEnabled) 1f else 0.5f
+            val checkBox = CheckBox(this@MainActivity).apply {
+                buttonTintList = ColorStateList.valueOf(SETTINGS_ACCENT)
+                this.isChecked = isChecked
+                this.isEnabled = isEnabled
+                isClickable = false
+                isFocusable = false
+            }
+            addView(checkBox, LinearLayout.LayoutParams(dp(48), dp(48)))
+            setOnClickListener {
+                if (!isEnabled) return@setOnClickListener
+                val next = !checkBox.isChecked
+                checkBox.isChecked = next
+                onCheckedChanged(next)
+            }
         }
 
     private fun settingsDestructiveActionRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =

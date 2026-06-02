@@ -12,6 +12,7 @@ class AppSettingsStore(private val context: Context) {
         val scannerStopped: Boolean,
         val gnssMode: GnssMode,
         val reportingMode: ReportingMode,
+        val mockTelemetryEnabled: Boolean,
         val lastReportedAt: Instant?,
     )
 
@@ -29,6 +30,7 @@ class AppSettingsStore(private val context: Context) {
             reportingMode = ReportingMode.fromName(
                 preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, ReportingMode.Hourly.name),
             ),
+            mockTelemetryEnabled = preferences.getBoolean(KEY_MOCK_TELEMETRY_ENABLED, true),
             lastReportedAt = ReportingScheduler.lastReportedAt(context),
         )
     }
@@ -38,17 +40,20 @@ class AppSettingsStore(private val context: Context) {
         scannerStopped: Boolean,
         gnssMode: GnssMode,
         reportingMode: ReportingMode,
+        mockTelemetryEnabled: Boolean,
     ) {
         ReportingScheduler.appPreferences(context).edit()
             .putBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, consentGranted)
             .putBoolean(KEY_SCANNER_STOPPED, scannerStopped)
             .putString(KEY_GNSS_MODE, gnssMode.name)
             .putString(ReportingScheduler.KEY_REPORTING_MODE, reportingMode.name)
+            .putBoolean(KEY_MOCK_TELEMETRY_ENABLED, mockTelemetryEnabled)
             .apply()
     }
 
     private companion object {
         const val KEY_SCANNER_STOPPED = "scannerStopped"
         const val KEY_GNSS_MODE = "gnssMode"
+        const val KEY_MOCK_TELEMETRY_ENABLED = "mockTelemetryEnabled"
     }
 }

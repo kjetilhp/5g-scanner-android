@@ -39,8 +39,12 @@
     <string name="settings_section_reporting">Reporting</string>
     <string name="settings_section_logs">Coverage logs</string>
     <string name="settings_section_about">About</string>
+    <string name="settings_section_developer">Developer</string>
     <string name="setting_about_title">About</string>
     <string name="setting_about_summary">Version, privacy, and data collection.</string>
+    <string name="setting_mock_telemetry_title">Mock telemetry</string>
+    <string name="setting_mock_telemetry_summary">Use synthesized data instead of actual radio and GNSS readings.</string>
+    <string name="setting_mock_telemetry_emulator_summary">Mock telemetry is always used on emulators.</string>
     <string name="about_intro_title">About</string>
     <string name="about_intro_body">This app maps mobile coverage using voluntary signal measurements.</string>
     <string name="about_data_title">Data collected</string>

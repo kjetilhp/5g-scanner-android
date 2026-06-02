@@ -27,18 +27,17 @@ import no.politiet.pit.storage.CoverageLogStore
 import no.politiet.pit.telemetry.CoverageSampleAssembler
 import no.politiet.pit.telemetry.CoverageSampleAssembler.AssemblyResult
 import no.politiet.pit.telemetry.GnssTelemetrySource
-import no.politiet.pit.telemetry.MockGnssTelemetrySource
-import no.politiet.pit.telemetry.MockRadioTelemetrySource
 import no.politiet.pit.telemetry.RadioTelemetrySource
 import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
+import no.politiet.pit.telemetry.TelemetrySourceFactory
 import java.time.Instant
 
 class ScannerService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var coverageLogStore: CoverageLogStore
     private lateinit var settingsStore: AppSettingsStore
-    private val radioTelemetrySource: RadioTelemetrySource = MockRadioTelemetrySource()
-    private val gnssTelemetrySource: GnssTelemetrySource = MockGnssTelemetrySource()
+    private lateinit var radioTelemetrySource: RadioTelemetrySource
+    private lateinit var gnssTelemetrySource: GnssTelemetrySource
     private val gnssQualityThresholds = CoverageSampleAssembler.GnssQualityThresholds(
         maxStationaryFixAgeSeconds = 30,
         maxSlowFixAgeSeconds = 10,
@@ -54,6 +53,8 @@ class ScannerService : Service() {
     private var gnssMode = GnssMode.Balanced
     private var telemetryGnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
+    private var mockTelemetryEnabled = true
+    private var effectiveMockTelemetry = true
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -89,6 +90,7 @@ class ScannerService : Service() {
         super.onCreate()
         coverageLogStore = CoverageLogStore(this)
         settingsStore = AppSettingsStore(this)
+        configureTelemetrySources(useMockTelemetry = true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -152,10 +154,23 @@ class ScannerService : Service() {
         val settings = settingsStore.load(legacyConsentGranted = false)
         gnssMode = settings.gnssMode
         reportingMode = settings.reportingMode
+        val useMockTelemetry = settings.mockTelemetryEnabled || DeviceProfile.isLikelyEmulator()
+        if (effectiveMockTelemetry != useMockTelemetry) {
+            configureTelemetrySources(useMockTelemetry)
+        }
+        mockTelemetryEnabled = settings.mockTelemetryEnabled
         if (telemetryGnssMode != gnssMode) {
             latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
             telemetryGnssMode = gnssMode
         }
+    }
+
+    private fun configureTelemetrySources(useMockTelemetry: Boolean) {
+        val sources = TelemetrySourceFactory.create(this, useMockTelemetry)
+        radioTelemetrySource = sources.radio
+        gnssTelemetrySource = sources.gnss
+        effectiveMockTelemetry = useMockTelemetry
+        Log.i(TAG, "Telemetry sources configured: ${if (useMockTelemetry) "mock" else "android"}")
     }
 
     private fun scannerDesired(): Boolean {
@@ -265,6 +280,7 @@ class ScannerService : Service() {
         currentState = State(
             isRunning = true,
             blockedReason = blockReason,
+            mockTelemetryActive = effectiveMockTelemetry,
             sampleCount = sampleCount,
             latestTelemetry = latestTelemetry,
         )
@@ -321,6 +337,7 @@ class ScannerService : Service() {
     data class State(
         val isRunning: Boolean,
         val blockedReason: String?,
+        val mockTelemetryActive: Boolean,
         val sampleCount: Int,
         val latestTelemetry: ScannerTelemetrySnapshot,
     )
@@ -341,6 +358,7 @@ class ScannerService : Service() {
         var currentState: State = State(
             isRunning = false,
             blockedReason = null,
+            mockTelemetryActive = true,
             sampleCount = 0,
             latestTelemetry = ScannerTelemetrySnapshot.initial(GnssMode.Balanced),
         )
