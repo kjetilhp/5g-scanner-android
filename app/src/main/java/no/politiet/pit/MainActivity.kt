@@ -39,6 +39,7 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
+import no.politiet.pit.domain.Cell
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
 import no.politiet.pit.encoding.CoverageSampleJsonEncoder
@@ -77,9 +78,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var gnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
     private var lastReportedAt: Instant? = null
+    private val mobileOperatorLookup: MobileOperatorLookup by lazy {
+        MobileOperatorLookup.fromRawResource(this, R.raw.mobile_operators)
+    }
 
     private var telemetryBars: TelemetryBarsView? = null
     private var telemetryHelpButton: ImageButton? = null
+    private var servingCellText: TextView? = null
     private var titleSignalIcon: SignalQualityIconView? = null
     private var rfSignalBackground: RfSignalBackgroundView? = null
     private var stopStartButton: ImageButton? = null
@@ -365,6 +370,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             dp(292),
         ).apply {
             topMargin = dp(58)
+        })
+        servingCellText = servingCellSummaryText().apply {
+            text = servingCellSummary(latestTelemetry.radio.servingCell)
+        }
+        content.addView(servingCellText, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            topMargin = dp(8)
         })
 
         val scrollView = ScrollView(this).apply {
@@ -722,6 +736,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun clearScannerViews() {
         telemetryBars = null
+        servingCellText = null
         titleSignalIcon = null
         telemetryHelpButton = null
         rfSignalBackground?.setScanning(false)
@@ -858,6 +873,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         rfSignalBackground?.setScanning(canSample(), latestTelemetry.overallQuality())
         if (!canSample()) {
             telemetryBars?.showNoData()
+        }
+        servingCellText?.apply {
+            text = if (canSample()) servingCellSummary(latestTelemetry.radio.servingCell) else getString(R.string.serving_cell_unavailable)
+            alpha = if (canSample()) 1f else 0.56f
         }
         telemetryHelpButton?.visibility = if (canSample()) View.VISIBLE else View.GONE
         stopStartButton?.apply {
@@ -1050,6 +1069,21 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
             addView(titleSignalIcon, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
+
+    private fun servingCellSummaryText(): TextView =
+        TextView(this).apply {
+            textSize = 13f
+            setTextColor(SCANNER_SOFT_TEXT)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = roundedBackground(SCANNER_PANEL, dp(8))
+        }
+
+    private fun servingCellSummary(cell: Cell): String {
+        val operator = mobileOperatorLookup.displayNameFor(cell.mcc, cell.mnc)
+        return getString(R.string.serving_cell_summary, cell.rat, cell.band, RadioFrequencyFormatter.displayText(cell), operator)
+    }
 
     private fun headerSettingsButton(): ImageButton =
         ImageButton(this).apply {

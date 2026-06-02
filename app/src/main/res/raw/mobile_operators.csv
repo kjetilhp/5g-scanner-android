@@ -1,0 +1,31 @@
+# MCC/MNC display names used only for UI labels. Raw MCC/MNC remain the source of truth.
+# Norway MCC 242, based on public MCC/MNC listings and Nkom shared private/test ranges.
+mcc,mnc,display_name
+242,01,Telenor
+242,02,Telia
+242,03,Televerket
+242,04,Tele2
+242,05,OneCall / MyCall
+242,06,ice
+242,07,Phonero
+242,08,Telia
+242,09,Com4
+242,10,Nkom
+242,11,SystemNet
+242,12,Telenor
+242,14,ice
+242,15,eRate
+242,20,Jernbaneverket
+242,21,Jernbaneverket
+242,22,Altibox
+242,23,Lycamobile
+242,24,Mobile Norway
+242,25,Forsvaret
+242,70,Private/test network
+242,71,Local private network
+242,72,Local private network
+242,73,Private/test network
+242,74,Private/test network
+242,75,Private/test network
+242,90,Nokia
+242,99,Tampnet

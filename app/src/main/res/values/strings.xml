@@ -12,6 +12,8 @@
     <string name="grant_consent">Grant consent</string>
     <string name="never">never</string>
     <string name="no_data">Scanner not running</string>
+    <string name="serving_cell_summary">%1$s - Band %2$d - %3$s - %4$s</string>
+    <string name="serving_cell_unavailable">Serving cell unavailable</string>
     <string name="measurement_help_action">Explain measurements</string>
     <string name="measurement_help_title">Signal measurements</string>
     <string name="measurement_help_body">RSRP (dBm)\nReceived signal power. Less negative is better.\n\nRSRQ (dB)\nSignal quality compared with interference and load. Less negative is better.\n\nSINR (dB)\nSignal-to-noise ratio. Higher is better.\n\nLocation (HDOP / age)\nLower HDOP and a newer fix are better.\n\nWhite line\nPrevious sample.</string>
