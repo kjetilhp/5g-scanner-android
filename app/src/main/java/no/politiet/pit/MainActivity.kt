@@ -17,6 +17,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -26,6 +27,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -75,6 +78,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var startButtonPulseScheduled = false
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
+    private var settingsBackCallback: OnBackInvokedCallback? = null
     private var latestTelemetry = MockTelemetry.initial(gnssMode)
     private var samplerScheduled = false
     private var settingsRefreshScheduled = false
@@ -133,8 +137,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         coverageLogStore = CoverageLogStore(this)
         settingsStore = AppSettingsStore(this)
         loadState()
+        Log.d(TAG, "Activity created: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
+        logAppliedSettingsOnLaunch()
         ReportingScheduler.appPreferences(this).registerOnSharedPreferenceChangeListener(this)
         saveState()
+        ReportingScheduler.scheduleOnLaunch(this)
         render()
     }
 
@@ -147,6 +154,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     override fun onDestroy() {
+        updateSettingsBackCallback(enabled = false)
         ReportingScheduler.appPreferences(this).unregisterOnSharedPreferenceChangeListener(this)
         handler.removeCallbacks(sampler)
         handler.removeCallbacks(startButtonPulse)
@@ -168,27 +176,57 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        when {
+        if (!handleBackNavigation()) {
+            super.onBackPressed()
+        }
+    }
+
+    private fun handleBackNavigation(): Boolean {
+        return when {
             showingSettings && settingsDestination == SettingsDestination.LogFile -> {
+                Log.d(TAG, "Back pressed: log file -> log list")
                 settingsDestination = SettingsDestination.LogList
                 selectedLogFile = null
                 render(ScreenTransition.Back)
+                true
             }
             showingSettings && settingsDestination == SettingsDestination.LogList -> {
+                Log.d(TAG, "Back pressed: log list -> settings")
                 settingsDestination = SettingsDestination.Main
                 render(ScreenTransition.Back)
+                true
             }
             showingSettings -> {
+                Log.d(TAG, "Back pressed: settings -> scanner")
                 showingSettings = false
                 settingsDestination = SettingsDestination.Main
                 selectedLogFile = null
                 render(ScreenTransition.Back)
+                true
             }
-            else -> super.onBackPressed()
+            else -> false
+        }
+    }
+
+    private fun updateSettingsBackCallback(enabled: Boolean = showingSettings) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+
+        val callback = settingsBackCallback
+        if (enabled && callback == null) {
+            val newCallback = OnBackInvokedCallback { handleBackNavigation() }
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                newCallback,
+            )
+            settingsBackCallback = newCallback
+        } else if (!enabled && callback != null) {
+            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+            settingsBackCallback = null
         }
     }
 
     private fun render(transition: ScreenTransition = ScreenTransition.None) {
+        updateSettingsBackCallback()
         val nextView = when {
             !consentGranted -> createConsentView()
             showingSettings -> when (settingsDestination) {
@@ -202,7 +240,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         animateScreenTransition(nextView, transition)
         if (consentGranted) {
             ensureSamplerState()
-            ensureReportingScheduler()
             updateScannerUi()
         }
     }
@@ -251,7 +288,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             text = getString(R.string.grant_consent)
             setOnClickListener {
                 consentGranted = true
+                Log.d(TAG, "Consent granted")
                 saveState()
+                ensureReportingScheduler()
                 handler.postDelayed({ render() }, CONSENT_TRANSITION_DELAY_MS)
             }
         }, LinearLayout.LayoutParams(
@@ -368,10 +407,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 showReportingModeDialog()
             },
         )
+        reportingRows.add(settingsPreferenceRow(
+            title = getString(R.string.setting_view_logs_title),
+            summary = logStatsSummary(),
+            value = "",
+        ) {
+            Log.d(TAG, "Opening coverage logs")
+            settingsDestination = SettingsDestination.LogList
+            render(ScreenTransition.Forward)
+        })
         if (reportingMode != ReportingMode.Continuous) {
-            reportingRows.add(settingsActionButtonRow(
+            reportingRows.add(settingsActionRow(
                 title = getString(R.string.setting_send_now_title),
                 summary = getString(R.string.setting_send_now_summary),
+                titleColor = SETTINGS_ACCENT,
             ) {
                 sendNow()
             })
@@ -379,30 +428,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
         content.addView(settingsGroup(*reportingRows.toTypedArray()))
 
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_logs)))
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_about)))
         content.addView(settingsGroup(
-            settingsPreferenceRow(
-                title = getString(R.string.setting_view_logs_title),
-                summary = logStatsSummary(),
-                value = "",
-            ) {
-                settingsDestination = SettingsDestination.LogList
-                render(ScreenTransition.Forward)
-            },
-        ))
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_privacy)))
-        content.addView(settingsGroup(
-            settingsInfoRow(
-                title = getString(R.string.setting_storage_title),
-                summary = getString(
-                    R.string.setting_storage_summary,
+            settingsParagraphRow(
+                getString(
+                    R.string.setting_about_summary,
                     coverageLogStore.displayDirectory(),
                 ),
-            ),
-            settingsInfoRow(
-                title = getString(R.string.setting_participation_title),
-                summary = getString(R.string.setting_participation_summary),
             ),
         ))
 
@@ -454,6 +486,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                         dateTimeFormatter.format(Instant.ofEpochMilli(logFile.modifiedAtMillis)),
                     ),
                 ) {
+                    Log.d(TAG, "Opening coverage log: ${logFile.name}, sizeBytes=${logFile.sizeBytes}")
                     selectedLogFile = logFile
                     settingsDestination = SettingsDestination.LogFile
                     render(ScreenTransition.Forward)
@@ -489,6 +522,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(getString(R.string.delete_all_logs_confirm_action)) { _, _ ->
                 coverageLogStore.deleteAllLogs()
+                Log.d(TAG, "Deleted all local coverage logs")
                 selectedLogFile = null
                 settingsDestination = SettingsDestination.LogList
                 render()
@@ -565,6 +599,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val capturedAt = Instant.now()
         lastSampleAt = capturedAt
         latestTelemetry = MockTelemetry.fromSample(sampleCount, gnssMode)
+        Log.d(TAG, "Captured mock sample: sampleNumber=$sampleCount, capturedAt=$capturedAt, gnssMode=${gnssMode.name}")
         writeMockSample(sampleCount, capturedAt, latestTelemetry)
         telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
         triggerContinuousReporting()
@@ -578,6 +613,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 sampleJson = MockCoverageSampleJsonEncoder.encode(sampleNumber, capturedAt, telemetry),
                 capturedAt = capturedAt,
             )
+            Log.d(TAG, "Appended coverage sample: sampleNumber=$sampleNumber, capturedAt=$capturedAt")
         }.onFailure { error ->
             Log.e(TAG, "Could not append coverage sample", error)
         }
@@ -587,12 +623,14 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         stoppedManually = true
         handler.removeCallbacks(sampler)
         samplerScheduled = false
+        Log.d(TAG, "Scanner stopped manually")
         saveState()
         updateScannerUi()
     }
 
     private fun startScanning() {
         stoppedManually = false
+        Log.d(TAG, "Scanner started manually")
         saveState()
         ensureSamplerState()
         updateScannerUi()
@@ -606,6 +644,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (!canSample()) {
             handler.removeCallbacks(sampler)
             samplerScheduled = false
+            Log.d(TAG, "Sampler disabled: consentGranted=$consentGranted, scannerStopped=$stoppedManually")
             return
         }
         scheduleNextSample(0L)
@@ -614,6 +653,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun scheduleNextSample(delayMs: Long) {
         if (samplerScheduled) return
         samplerScheduled = true
+        Log.d(TAG, "Scheduling next sample: delayMs=$delayMs")
         handler.postDelayed(sampler, delayMs)
     }
 
@@ -624,6 +664,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun ensureReportingScheduler() {
+        Log.d(TAG, "Ensuring reporting scheduler: consentGranted=$consentGranted, reportingMode=${reportingMode.name}")
         ReportingScheduler.schedule(this, consentGranted, reportingMode.name)
     }
 
@@ -634,7 +675,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun triggerReporting(onComplete: ((Boolean) -> Unit)? = null) {
+        Log.d(TAG, "Triggering reporting: reportingMode=${reportingMode.name}")
         ReportingScheduler.recordTrigger(this, reportingMode.name) { success ->
+            Log.d(TAG, "Reporting trigger completed: success=$success")
             if (success) {
                 refreshLastReportedAt()
             }
@@ -739,6 +782,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         reportingMode = settings.reportingMode
         lastReportedAt = settings.lastReportedAt
         latestTelemetry = MockTelemetry.initial(gnssMode)
+        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, lastReportedAt=$lastReportedAt")
     }
 
     private fun saveState() {
@@ -747,6 +791,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             scannerStopped = stoppedManually,
             gnssMode = gnssMode,
             reportingMode = reportingMode,
+        )
+        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
+    }
+
+    private fun logAppliedSettingsOnLaunch() {
+        if (!consentGranted) return
+
+        Log.i(
+            TAG,
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageLogDirectory=${coverageLogStore.displayDirectory()}",
         )
     }
 
@@ -834,19 +888,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             titleSignalIcon = SignalQualityIconView().apply {
                 setQuality(latestTelemetry.overallQuality(), animate = false)
             }
-            addView(titleSignalIcon, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
-                marginEnd = dp(12)
-            })
-
-            addView(TextView(this@MainActivity).apply {
-                text = getString(R.string.app_name)
-                textSize = 44f
-                setTextColor(Color.WHITE)
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
+            addView(titleSignalIcon, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
 
     private fun headerSettingsButton(): ImageButton =
@@ -861,6 +903,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 roundedBackground(Color.WHITE, dp(24)),
             )
             setOnClickListener {
+                Log.d(TAG, "Opening settings")
                 showingSettings = true
                 settingsDestination = SettingsDestination.Main
                 selectedLogFile = null
@@ -1022,47 +1065,24 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun settingsInfoRow(title: String, summary: String): LinearLayout =
         settingsRow(title, summary, value = null, isClickable = false)
 
-    private fun settingsActionRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
-        settingsRow(title, summary, value = null, isClickable = true).apply {
-            setOnClickListener { onClick() }
+    private fun settingsParagraphRow(text: String): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTextColor(SETTINGS_SUBTLE_TEXT)
+            includeFontPadding = true
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-    private fun settingsActionButtonRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(64)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = rippleBackground(Color.WHITE, dp(8))
-            isFocusable = true
+    private fun settingsActionRow(
+        title: String,
+        summary: String,
+        titleColor: Int = SETTINGS_TEXT,
+        onClick: () -> Unit,
+    ): LinearLayout =
+        settingsRow(title, summary, value = null, isClickable = true, titleColor = titleColor).apply {
             setOnClickListener { onClick() }
-
-            addView(ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_send_24)
-                setColorFilter(SETTINGS_ACCENT)
-                scaleType = ImageView.ScaleType.CENTER
-            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply {
-                marginEnd = dp(16)
-            })
-
-            val textColumn = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            textColumn.addView(TextView(this@MainActivity).apply {
-                text = title
-                textSize = 16f
-                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                setTextColor(SETTINGS_ACCENT)
-                includeFontPadding = false
-            })
-            textColumn.addView(TextView(this@MainActivity).apply {
-                text = summary
-                textSize = 14f
-                setTextColor(SETTINGS_SUBTLE_TEXT)
-                setPadding(0, dp(4), 0, 0)
-            })
-            addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
     private fun settingsDestructiveActionRow(title: String, summary: String, onClick: () -> Unit): LinearLayout =
@@ -1145,6 +1165,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setTitle(getString(R.string.setting_gnss_mode_title))
             .setSingleChoiceItems(labels, GnssMode.entries.indexOf(gnssMode)) { dialog, which ->
                 gnssMode = GnssMode.entries[which]
+                Log.d(TAG, "GNSS mode changed: gnssMode=${gnssMode.name}")
                 saveState()
                 dialog.dismiss()
                 render()
@@ -1159,6 +1180,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setTitle(getString(R.string.setting_reporting_mode_title))
             .setSingleChoiceItems(labels, ReportingMode.entries.indexOf(reportingMode)) { dialog, which ->
                 reportingMode = ReportingMode.entries[which]
+                Log.d(TAG, "Reporting mode changed: reportingMode=${reportingMode.name}")
                 saveState()
                 ensureReportingScheduler()
                 dialog.dismiss()

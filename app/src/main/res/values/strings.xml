@@ -25,7 +25,7 @@
     <string name="settings_section_location">Location</string>
     <string name="settings_section_reporting">Reporting</string>
     <string name="settings_section_logs">Coverage logs</string>
-    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_section_about">About</string>
     <string name="coverage_logs_actions_section">Actions</string>
     <string name="setting_gnss_mode_title">GNSS mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
@@ -34,8 +34,7 @@
     <string name="setting_send_now_summary">Send queued logs stored on this device.</string>
     <string name="setting_send_now_success_message">No-op send succeeded. Last sent has been updated.</string>
     <string name="setting_send_now_failed_message">No-op send failed. Check the network connection and try again.</string>
-    <string name="setting_storage_title">Storage</string>
-    <string name="setting_storage_summary">Coverage samples are stored locally first as daily JSONL files in %1$s. Server upload is not enabled in this prototype.</string>
+    <string name="setting_about_summary">Ask collects location, timestamps, connectivity state, and cellular radio measurements while scanning is enabled.\n\nCoverage samples are stored locally first as daily JSONL files in %1$s. Server upload is not enabled in this prototype.\n\nScanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
     <string name="setting_view_logs_title">View coverage logs</string>
     <string name="log_files_empty_title">No log files</string>
     <string name="log_files_empty_summary">Samples will appear here after scanning writes to %1$s.</string>
@@ -46,8 +45,6 @@
     <string name="delete_all_logs_summary">Delete every coverage log stored on this device.</string>
     <string name="delete_all_logs_confirm_message">Delete all coverage log files from this device? This cannot be undone.</string>
     <string name="delete_all_logs_confirm_action">Delete</string>
-    <string name="setting_participation_title">Participation</string>
-    <string name="setting_participation_summary">Scanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
     <plurals name="log_files_summary">
         <item quantity="one">%1$d file, %2$s total</item>
         <item quantity="other">%1$d files, %2$s total</item>
