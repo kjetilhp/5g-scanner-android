@@ -82,7 +82,7 @@ Hourly is the initial default so early server-side reporting can be validated wi
 
 Settings should always show Last sent as supporting text inside the reporting mode row. Last sent is app-wide reporting state and updates only after a successful network upload or prototype no-op upload succeeds.
 
-When Manual, Daily, or Hourly is selected, settings should also show a Send now action below the reporting mode row. It is a one-time manual upload action and should not change the automatic reporting mode. Continuous does not show Send now because it reports when new measurements are collected.
+When Manual, Daily, or Hourly is selected, settings should also show a Send now action at the bottom of the reporting section. It is a one-time manual upload action and should not change the automatic reporting mode. Continuous does not show Send now because it reports when new measurements are collected.
 
 When Daily or Hourly is selected, the app should schedule reporting from the current setting with Android's native scheduler. Continuous should not use the periodic scheduler; it should report when new signal measurements are collected. Until the first successful reporting trigger, Last sent should read `never`. The prototype reporting path makes a lightweight no-op network call and updates Last sent only when that call succeeds. Reporting is gated by app-level consent and network availability.
 
@@ -112,11 +112,10 @@ The app should derive one effective state from these inputs and show that state 
 
 ## Future Settings
 
-Defer these until the app has basic local logging:
+Defer these until the app has basic local logging and reporting:
 
 - Upload/sync destination
 - Wi-Fi-only upload
 - Data retention period
-- Manual export format
 - Debug verbosity
 - Dual-SIM selection

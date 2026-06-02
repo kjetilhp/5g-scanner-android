@@ -2,11 +2,11 @@
 <resources>
     <string name="app_name">Ask</string>
     <string name="app_subtitle">Network Connectivity Scanner</string>
-    <string name="consent_intro">Before scanning, Ask needs your consent. Participation is voluntary.</string>
+    <string name="consent_intro">Before scanning, this app needs your consent. Participation is voluntary.</string>
     <string name="consent_data_scope_title">Data collected</string>
     <string name="consent_data_scope">When scanning is enabled, the app will collect location, timestamps, connectivity state, and cellular radio measurements where Android exposes them.</string>
     <string name="consent_storage_title">Storage and reporting</string>
-    <string name="consent_local_only">This prototype stores daily JSONL logs locally under Documents/Ask. Upload and sharing are not enabled.</string>
+    <string name="consent_local_only">Coverage samples are stored locally and periodically reported to the server according to your reporting setting.</string>
     <string name="consent_control_title">Your control</string>
     <string name="consent_reversible">After consent, scanning starts automatically unless stopped. You can stop scanning later or uninstall the app to stop participating.</string>
     <string name="grant_consent">Grant consent</string>
@@ -34,13 +34,15 @@
     <string name="setting_send_now_summary">Send queued logs stored on this device.</string>
     <string name="setting_send_now_success_message">No-op send succeeded. Last sent has been updated.</string>
     <string name="setting_send_now_failed_message">No-op send failed. Check the network connection and try again.</string>
-    <string name="setting_about_summary">Ask collects location, timestamps, connectivity state, and cellular radio measurements while scanning is enabled.\n\nCoverage samples are stored locally first as daily JSONL files in %1$s. Server upload is not enabled in this prototype.\n\nScanning can be stopped from the main screen. Uninstalling the app stops participation.</string>
+    <string name="setting_about_summary">This app collects location, timestamps, connectivity state, and cellular radio measurements while scanning is enabled.\n\nCoverage samples are stored locally and periodically reported to the server according to your reporting setting.\n\nParticipation is voluntary. You can stop scanning from the main screen, and uninstalling the app stops participation.</string>
     <string name="setting_view_logs_title">View coverage logs</string>
     <string name="log_files_empty_title">No log files</string>
     <string name="log_files_empty_summary">Samples will appear here after scanning writes to %1$s.</string>
     <string name="log_file_summary">%1$s, modified %2$s</string>
-    <string name="log_file_raw_summary">Raw JSONL, %1$s</string>
-    <string name="log_file_empty">This log file is empty.</string>
+    <string name="coverage_log_view_csv_action">View as CSV</string>
+    <string name="coverage_log_share_csv_action">Share CSV</string>
+    <string name="coverage_csv_preview_summary">Generated CSV preview. Use Share CSV from the log actions to send this file to another app.</string>
+    <string name="coverage_csv_empty">This CSV export is empty.</string>
     <string name="delete_all_logs_title">Delete all</string>
     <string name="delete_all_logs_summary">Delete every coverage log stored on this device.</string>
     <string name="delete_all_logs_confirm_message">Delete all coverage log files from this device? This cannot be undone.</string>

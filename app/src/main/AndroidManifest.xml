@@ -34,6 +34,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <provider
+            android:name=".storage.CoverageLogFileProvider"
+            android:authorities="${applicationId}.coverage-exports"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 
 </manifest>

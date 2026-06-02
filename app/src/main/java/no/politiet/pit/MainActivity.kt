@@ -5,6 +5,7 @@ import android.animation.ValueAnimator
 import android.animation.AnimatorSet
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Canvas
 import android.graphics.Color
@@ -62,7 +63,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var stoppedManually = false
     private var showingSettings = false
     private var settingsDestination = SettingsDestination.Main
-    private var selectedLogFile: CoverageLogStore.LogFile? = null
+    private var selectedCsvTitle: String? = null
+    private var selectedCsvText: String? = null
     private var sampleCount = 0
     private var lastSampleAt: Instant? = null
     private var gnssMode = GnssMode.Balanced
@@ -126,7 +128,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private val settingsRefresh = object : Runnable {
         override fun run() {
             settingsRefreshScheduled = false
-            if (showingSettings && settingsDestination != SettingsDestination.LogFile) {
+            if (showingSettings && settingsDestination != SettingsDestination.CsvPreview) {
                 render()
             }
         }
@@ -183,15 +185,17 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun handleBackNavigation(): Boolean {
         return when {
-            showingSettings && settingsDestination == SettingsDestination.LogFile -> {
-                Log.d(TAG, "Back pressed: log file -> log list")
+            showingSettings && settingsDestination == SettingsDestination.CsvPreview -> {
+                Log.d(TAG, "Back pressed: CSV preview -> log list")
+                selectedCsvTitle = null
+                selectedCsvText = null
                 settingsDestination = SettingsDestination.LogList
-                selectedLogFile = null
                 render(ScreenTransition.Back)
                 true
             }
             showingSettings && settingsDestination == SettingsDestination.LogList -> {
                 Log.d(TAG, "Back pressed: log list -> settings")
+                clearSelectedCsvPreview()
                 settingsDestination = SettingsDestination.Main
                 render(ScreenTransition.Back)
                 true
@@ -200,7 +204,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 Log.d(TAG, "Back pressed: settings -> scanner")
                 showingSettings = false
                 settingsDestination = SettingsDestination.Main
-                selectedLogFile = null
+                clearSelectedCsvPreview()
                 render(ScreenTransition.Back)
                 true
             }
@@ -232,7 +236,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             showingSettings -> when (settingsDestination) {
                 SettingsDestination.Main -> createSettingsView()
                 SettingsDestination.LogList -> createLogListView()
-                SettingsDestination.LogFile -> createLogFileView()
+                SettingsDestination.CsvPreview -> createCsvPreviewView()
             }
             else -> createScannerView()
         }
@@ -431,10 +435,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         content.addView(settingsSectionLabel(getString(R.string.settings_section_about)))
         content.addView(settingsGroup(
             settingsParagraphRow(
-                getString(
-                    R.string.setting_about_summary,
-                    coverageLogStore.displayDirectory(),
-                ),
+                getString(R.string.setting_about_summary),
             ),
         ))
 
@@ -487,9 +488,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     ),
                 ) {
                     Log.d(TAG, "Opening coverage log: ${logFile.name}, sizeBytes=${logFile.sizeBytes}")
-                    selectedLogFile = logFile
-                    settingsDestination = SettingsDestination.LogFile
-                    render(ScreenTransition.Forward)
+                    showCoverageLogActions(logFile)
                 }
             }
             content.addView(settingsGroup(*rows.toTypedArray()))
@@ -508,6 +507,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             title = getString(R.string.setting_view_logs_title),
             backDescription = getString(R.string.back_to_settings),
             onBack = {
+                clearSelectedCsvPreview()
                 settingsDestination = SettingsDestination.Main
                 render(ScreenTransition.Back)
             },
@@ -523,37 +523,75 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setPositiveButton(getString(R.string.delete_all_logs_confirm_action)) { _, _ ->
                 coverageLogStore.deleteAllLogs()
                 Log.d(TAG, "Deleted all local coverage logs")
-                selectedLogFile = null
                 settingsDestination = SettingsDestination.LogList
                 render()
             }
             .show()
     }
 
-    private fun createLogFileView(): View {
+    private fun showCoverageLogActions(logFile: CoverageLogStore.LogFile) {
+        AlertDialog.Builder(this)
+            .setTitle(logFile.name)
+            .setItems(
+                arrayOf(
+                    getString(R.string.coverage_log_view_csv_action),
+                    getString(R.string.coverage_log_share_csv_action),
+                ),
+            ) { _, which ->
+                when (which) {
+                    0 -> previewCoverageLogCsv(logFile)
+                    1 -> shareCoverageLogCsv(logFile)
+                }
+            }
+            .show()
+    }
+
+    private fun previewCoverageLogCsv(logFile: CoverageLogStore.LogFile) {
+        val csvFile = coverageLogStore.exportCsv(logFile)
+        selectedCsvTitle = csvFile.name
+        selectedCsvText = csvFile.readText(Charsets.UTF_8)
+        settingsDestination = SettingsDestination.CsvPreview
+        Log.d(TAG, "Previewing coverage CSV in-app: ${csvFile.name}")
+        render(ScreenTransition.Forward)
+    }
+
+    private fun shareCoverageLogCsv(logFile: CoverageLogStore.LogFile) {
+        val csvFile = coverageLogStore.exportCsv(logFile)
+        val uri = coverageLogStore.exportUri(csvFile)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, csvFile.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        Log.d(TAG, "Sharing coverage CSV: ${csvFile.name}, uri=$uri")
+        startActivity(Intent.createChooser(intent, getString(R.string.coverage_log_share_csv_action)))
+    }
+
+    private fun createCsvPreviewView(): View {
         clearScannerViews()
-        val logFile = selectedLogFile
-        if (logFile == null) {
+        val csvTitle = selectedCsvTitle
+        val csvText = selectedCsvText
+        if (csvTitle == null || csvText == null) {
             settingsDestination = SettingsDestination.LogList
             return createLogListView()
         }
 
-        val rawText = coverageLogStore.read(logFile)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(32))
         }
 
         content.addView(TextView(this).apply {
-            text = getString(R.string.log_file_raw_summary, formatBytes(logFile.sizeBytes))
+            text = getString(R.string.coverage_csv_preview_summary)
             textSize = 14f
             setTextColor(SETTINGS_SUBTLE_TEXT)
             includeFontPadding = false
             setPadding(0, 0, 0, dp(12))
         })
 
-        val rawTextView = TextView(this).apply {
-            text = rawText.ifBlank { getString(R.string.log_file_empty) }
+        val csvTextView = TextView(this).apply {
+            text = csvText.ifBlank { getString(R.string.coverage_csv_empty) }
             textSize = 12f
             typeface = android.graphics.Typeface.MONOSPACE
             setTextColor(SETTINGS_TEXT)
@@ -562,7 +600,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
         val horizontalScroller = HorizontalScrollView(this).apply {
-            addView(rawTextView)
+            addView(csvTextView)
         }
         content.addView(horizontalScroller, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -570,15 +608,21 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         ))
 
         return settingsScreen(
-            title = logFile.name,
+            title = csvTitle,
             backDescription = getString(R.string.back_to_logs),
             onBack = {
+                selectedCsvTitle = null
+                selectedCsvText = null
                 settingsDestination = SettingsDestination.LogList
-                selectedLogFile = null
                 render(ScreenTransition.Back)
             },
             body = content,
         )
+    }
+
+    private fun clearSelectedCsvPreview() {
+        selectedCsvTitle = null
+        selectedCsvText = null
     }
 
     private fun clearScannerViews() {
@@ -658,7 +702,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun scheduleSettingsRefresh() {
-        if (!showingSettings || settingsDestination == SettingsDestination.LogFile || settingsRefreshScheduled) return
+        if (!showingSettings || settingsDestination == SettingsDestination.CsvPreview || settingsRefreshScheduled) return
         settingsRefreshScheduled = true
         handler.post(settingsRefresh)
     }
@@ -906,7 +950,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 Log.d(TAG, "Opening settings")
                 showingSettings = true
                 settingsDestination = SettingsDestination.Main
-                selectedLogFile = null
+                clearSelectedCsvPreview()
                 render(ScreenTransition.Forward)
             }
         }
@@ -1001,7 +1045,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         onBack: () -> Unit = {
             showingSettings = false
             settingsDestination = SettingsDestination.Main
-            selectedLogFile = null
+            clearSelectedCsvPreview()
             render(ScreenTransition.Back)
         },
     ): LinearLayout =
@@ -2063,7 +2107,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private enum class SettingsDestination {
         Main,
         LogList,
-        LogFile,
+        CsvPreview,
     }
 
     private enum class ScreenTransition {

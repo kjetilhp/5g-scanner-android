@@ -44,7 +44,7 @@ Expect to use:
 - Location APIs
 - A foreground service for active logging
 - Runtime permission handling
-- JSONL file export
+- JSONL file logging with user-facing CSV preview/share export
 
 The initial app is intentionally minimal: one native Android Activity with no Compose, AndroidX, or third-party dependencies. Add dependencies only when they pull real weight for the scanner, consent flow, or app ergonomics.
 
@@ -58,9 +58,9 @@ Start scanner work automatically when the effective state allows it:
 - Required Android permissions are granted
 - Scanning is not stopped until a future date/time
 
-Initial versions should assume local logging only. Upload/sync behavior is intentionally deferred and must require a later explicit product/privacy decision before implementation.
+Initial versions should assume local-first logging. Reporting/upload behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
-The current prototype writes mock samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes a coverage logs view for listing files, opening raw JSONL, and deleting all local coverage logs after confirmation.
+The current prototype writes mock samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes reporting controls, a coverage logs view for listing files, in-app CSV preview/share export, and deleting all local coverage logs after confirmation.
 
 ## Product Notes
 

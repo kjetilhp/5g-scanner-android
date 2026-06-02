@@ -8,7 +8,7 @@ The app should be built around informed, reversible participation.
 - Android permissions must be requested only with context
 - Revoking consent must stop scanning
 - Permission revocation must be handled gracefully
-- Upload behavior must not be added silently
+- Reporting/upload behavior must not be added or changed silently
 - Local logs should be deletable by the user
 
 This document is product guidance, not legal advice.
@@ -50,17 +50,17 @@ The first planned scope is:
 
 Avoid collecting personal account data or contact/user identifiers unless a later feature explicitly requires it and the consent model is updated.
 
-## Local Logging First
+## Local-First Reporting
 
 Initial behavior:
 
-- Store logs locally on device
-- Do not upload automatically
+- Store logs locally on device first
+- Report according to the user's reporting setting
 - Allow scanning to be stopped
-- Plan for local log deletion
-- Plan for manual export later
+- Allow local log deletion
+- Allow user-facing CSV preview/share export
 
-Future upload/sync should require:
+Material reporting/upload changes should require:
 
 - Updated privacy documentation
 - Explicit user-facing consent

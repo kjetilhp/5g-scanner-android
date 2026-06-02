@@ -10,7 +10,7 @@ Planning and project setup plus a simulator-friendly Android scanner prototype.
 
 The Android app name is `Ask`, and the package/application id is `no.politiet.pit`.
 
-The current product direction is a small, consent-led scanner app: the user voluntarily participates in scanning, can stop and start it, and can stop participating by uninstalling the app. Initial logging is local-only; upload/sync behavior is intentionally deferred.
+The current product direction is a small, consent-led scanner app: the user voluntarily participates in scanning, can stop and start it, and can stop participating by uninstalling the app. Logging is local-first, with reporting controlled by the app's reporting setting.
 
 ## Reference Project
 
@@ -71,7 +71,8 @@ The emulator build currently uses mock telemetry. It supports:
 - Daily JSONL log files written under `Documents/Ask/` on shared storage
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
-- Separate settings screen for GNSS mode, reporting, logs, and privacy details
+- Separate settings screen for GNSS mode, reporting, coverage logs, and About details
+- Coverage log CSV preview and Android Sharesheet export
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
@@ -110,6 +111,8 @@ Documents/Ask/coverage-YYYY-MM-DD.jsonl
 
 See [docs/output-contract.md](docs/output-contract.md) for the current contract notes.
 
+Coverage logs remain stored internally as JSONL. The app generates temporary CSV exports for on-device preview and sharing with other Android apps.
+
 ## Product and Privacy Notes
 
 Planning docs:
@@ -127,8 +130,8 @@ Core first-version assumptions:
 - Participation can stop by stopping scanning or uninstalling the app
 - The main UI should expose a clear scanning on/off control
 - The prototype samples on a fixed internal cadence; settings should avoid scanner controls that do not change real collection behavior
-- Settings should include location/GNSS behavior, reporting, local logs, and privacy details
-- Local logging comes before any upload/sync feature
+- Settings should include location/GNSS behavior, reporting, local logs, and About details
+- Local logging is the source of truth; user-facing exports are generated as CSV when needed
 
 ## Notes
 

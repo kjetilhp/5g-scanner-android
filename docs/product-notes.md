@@ -8,10 +8,9 @@ The app should only scan when all of these are true:
 
 - The user has granted app-level consent
 - The required Android permissions are granted
-- The user has turned scanning on
-- Scanning is not temporarily paused
+- Scanning is not stopped
 
-The first version should log locally only. Automatic upload, account linking, server sync, or public map contribution are deferred until a later explicit design and consent decision.
+The first version should log locally first. Reporting is controlled by a small reporting-mode setting and must remain consent-gated, transparent, and easy to explain.
 
 ## First Screens
 
@@ -21,8 +20,8 @@ The first-run flow should explain in plain language:
 
 - What is collected: location, timestamps, cellular/network metrics, and relevant device/network metadata
 - Why it is collected: voluntary crowdsourced coverage mapping
-- Where it goes initially: local device logs
-- What is not active yet: automatic upload/sync
+- Where it goes: local device storage first, with periodic reporting according to the user's reporting setting
+- How reporting is controlled: Hourly, Daily, Continuous, Manual, and Send now
 - How the user can stop scanning or revoke consent
 
 Consent should be tracked by the app separately from Android OS permission grants.
@@ -45,10 +44,11 @@ The user should never need to understand radio engineering details to know wheth
 Settings should favor a small number of understandable controls:
 
 - Pause/resume scanning
-- Pause scanning until a date/time
 - Location/GNSS behavior
+- Reporting mode and last sent status
+- Coverage log CSV preview/share
 - Consent and permission management
-- Local data deletion/export later
+- Local data deletion
 
 Sampling frequency should not be user-configurable until changing it would reliably change real collection behavior across supported phones. The prototype should use a fixed internal cadence.
 
