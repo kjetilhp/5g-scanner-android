@@ -6,19 +6,32 @@ import java.time.Duration
 import java.time.Instant
 
 class MockGnssTelemetrySource : GnssTelemetrySource {
-    private var latestFix: MockFixSnapshot? = null
+    private var latestReportedFix: MockFixSnapshot? = null
+    private var latestUsableFix: MockFixSnapshot? = null
+    private var fixSequence = 0
 
     override fun latest(
         sampleNumber: Int,
         capturedAt: Instant,
         gnssMode: GnssMode,
     ): GnssTelemetry {
-        val currentFix = latestFix
-        if (currentFix == null || currentFix.mode != gnssMode || shouldRefreshFix(sampleNumber, gnssMode)) {
-            latestFix = newFix(sampleNumber, capturedAt, gnssMode)
+        val currentReport = latestReportedFix
+        if (currentReport == null || currentReport.mode != gnssMode || shouldRefreshFix(currentReport, capturedAt, gnssMode)) {
+            fixSequence += 1
+            val reportedFix = newFix(capturedAt, gnssMode)
+            latestReportedFix = reportedFix
+            if (isUsableAt(reportedFix, capturedAt)) {
+                latestUsableFix = reportedFix
+            }
         }
 
-        val snapshot = latestFix ?: newFix(sampleNumber, capturedAt, gnssMode).also { latestFix = it }
+        val snapshot = latestUsableFix
+            ?.takeIf { it.mode == gnssMode && isUsableAt(it, capturedAt) }
+            ?: latestReportedFix
+            ?: newFix(capturedAt, gnssMode).also {
+                latestReportedFix = it
+                if (isUsableAt(it, capturedAt)) latestUsableFix = it
+            }
         val fixAgeSeconds = Duration
             .between(snapshot.fix.timestamp, capturedAt)
             .seconds
@@ -33,11 +46,11 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
         )
     }
 
-    private fun newFix(sampleNumber: Int, capturedAt: Instant, gnssMode: GnssMode): MockFixSnapshot {
-        val positionWave = sampleNumber % 36
-        val qualityWave = sampleNumber % 6
+    private fun newFix(capturedAt: Instant, gnssMode: GnssMode): MockFixSnapshot {
+        val positionWave = fixSequence % 36
+        val qualityWave = fixSequence % 6
         val profile = profileFor(gnssMode)
-        val degraded = shouldEmitDegradedFix(sampleNumber, gnssMode)
+        val degraded = shouldEmitDegradedFix(fixSequence, gnssMode)
         val hdop = if (degraded) profile.degradedHdop else profile.hdopValues[qualityWave]
         val horizontalAccuracy = if (degraded) profile.degradedAccuracyMeters else profile.accuracyValues[qualityWave]
 
@@ -52,27 +65,42 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
                 lon = 10.7522 + positionWave * 0.00011,
                 altitude = 23.0 + (positionWave % 5),
                 speed = profile.speedMetersPerSecond,
-                heading = ((sampleNumber * 17) % 360).toDouble(),
+                heading = ((fixSequence * 17) % 360).toDouble(),
                 hdop = hdop.toDouble(),
                 satellites = if (degraded) profile.degradedSatellites else profile.satellites,
             ),
         )
     }
 
-    private fun shouldRefreshFix(sampleNumber: Int, gnssMode: GnssMode): Boolean {
-        val interval = profileFor(gnssMode).refreshEverySamples
-        return sampleNumber % interval == 0
+    private fun shouldRefreshFix(currentFix: MockFixSnapshot, capturedAt: Instant, gnssMode: GnssMode): Boolean {
+        val intervalSeconds = profileFor(gnssMode).refreshIntervalSeconds
+        return Duration.between(currentFix.receivedAt, capturedAt).seconds >= intervalSeconds
     }
 
-    private fun shouldEmitDegradedFix(sampleNumber: Int, gnssMode: GnssMode): Boolean {
+    private fun shouldEmitDegradedFix(fixSequence: Int, gnssMode: GnssMode): Boolean {
         val degradedEvery = profileFor(gnssMode).degradedEverySamples
-        return degradedEvery != null && sampleNumber > 0 && sampleNumber % degradedEvery == 0
+        return degradedEvery != null && fixSequence > 0 && fixSequence % degradedEvery == 0
     }
+
+    private fun isUsableAt(snapshot: MockFixSnapshot, capturedAt: Instant): Boolean {
+        val ageSeconds = Duration.between(snapshot.fix.timestamp, capturedAt).seconds.coerceAtLeast(0L)
+        return ageSeconds < maxUsableFixAgeSeconds(snapshot.fix.speed) &&
+            snapshot.horizontalAccuracyMeters <= MAX_USABLE_ACCURACY_METERS &&
+            snapshot.fix.hdop <= MAX_USABLE_HDOP
+    }
+
+    private fun maxUsableFixAgeSeconds(speedMetersPerSecond: Double?): Long =
+        when {
+            speedMetersPerSecond == null -> 10L
+            speedMetersPerSecond >= 10.0 -> 5L
+            speedMetersPerSecond >= 2.0 -> 10L
+            else -> 30L
+        }
 
     private fun profileFor(gnssMode: GnssMode): MockGnssProfile =
         when (gnssMode) {
             GnssMode.HighAccuracy -> MockGnssProfile(
-                refreshEverySamples = 1,
+                refreshIntervalSeconds = 5,
                 speedMetersPerSecond = 3.2,
                 satellites = 18,
                 hdopValues = floatArrayOf(1.0f, 0.8f, 0.6f, 0.9f, 1.1f, 0.7f),
@@ -83,7 +111,7 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
                 degradedSatellites = 11,
             )
             GnssMode.Balanced -> MockGnssProfile(
-                refreshEverySamples = 2,
+                refreshIntervalSeconds = 11,
                 speedMetersPerSecond = 1.4,
                 satellites = 13,
                 hdopValues = floatArrayOf(1.8f, 1.3f, 0.9f, 1.5f, 2.1f, 1.0f),
@@ -94,7 +122,7 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
                 degradedSatellites = 7,
             )
             GnssMode.LowPower -> MockGnssProfile(
-                refreshEverySamples = 4,
+                refreshIntervalSeconds = 29,
                 speedMetersPerSecond = 2.8,
                 satellites = 9,
                 hdopValues = floatArrayOf(2.6f, 2.0f, 1.5f, 2.4f, 3.2f, 1.8f),
@@ -114,7 +142,7 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
     )
 
     private data class MockGnssProfile(
-        val refreshEverySamples: Int,
+        val refreshIntervalSeconds: Long,
         val speedMetersPerSecond: Double,
         val satellites: Int,
         val hdopValues: FloatArray,
@@ -124,4 +152,9 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
         val degradedAccuracyMeters: Float,
         val degradedSatellites: Int,
     )
+
+    private companion object {
+        const val MAX_USABLE_ACCURACY_METERS = 50f
+        const val MAX_USABLE_HDOP = 4.0
+    }
 }

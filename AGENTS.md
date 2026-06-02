@@ -54,15 +54,18 @@ Keep radio and GNSS collection separate. Implement mock and Android collectors b
 
 Cellular data availability varies by Android version, phone model, modem, carrier, SIM state, and granted permissions. Avoid assuming every metric is always present.
 
-Start scanner work automatically when the effective state allows it:
+Treat the scanner stop/start control as user intent:
 
 - App-level consent is granted
-- Required Android permissions are granted
-- Scanning is not stopped until a future date/time
+- Scanning is not stopped by the user
+
+Temporary blockers such as missing runtime permission, location disabled, flight mode, no cellular radio, or unusable GNSS should pause sample production and surface a clear blocked reason rather than silently converting the scanner to stopped. When the blocker clears and the user intent is still running, the scanner should resume when Android allows it. Force-stop, uninstall, app update/reinstall, process death, and reboot are separate lifecycle cases.
+
+Active scanning should run in a foreground service with a visible notification. The notification should indicate active sample production versus blocked/paused scanning; the UI should mirror the same state and keep the reason/action guard visible.
 
 Initial versions should assume local-first logging. Reporting/upload behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
-The current prototype writes mock samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes reporting controls, a coverage logs view for listing files, in-app CSV preview/share export, and deleting all local coverage logs after confirmation.
+The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources and writes accepted samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes reporting controls, a coverage logs view for listing files, in-app CSV preview/share export, and deleting all local coverage logs after confirmation.
 
 ## Product Notes
 

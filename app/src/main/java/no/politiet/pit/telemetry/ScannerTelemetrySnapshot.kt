@@ -12,12 +12,14 @@ data class ScannerTelemetrySnapshot(
 ) {
     fun metrics(now: Instant = Instant.now()): List<MetricQuality> {
         val signal = radio.servingCell.signal
-        val gnssFixAgeSeconds = currentGnssFixAgeSeconds(now)
+        val gnssAgeSeconds = currentGnssFixAgeSeconds(now)
+        val gnssAgeSecondsFloat = currentGnssFixAgeSecondsFloat(now)
+        val gnssUsability = gnssUsability(gnss, gnssAgeSecondsFloat)
         return listOf(
             MetricQuality("RSRP", "${signal.rsrp} dBm", qualityFromRange(signal.rsrp.toFloat(), -118f, -82f), MetricKind.Radio),
             MetricQuality("RSRQ", "${signal.rsrq} dB", qualityFromRange(signal.rsrq.toFloat(), -20f, -8f), MetricKind.Radio),
             MetricQuality("SINR", "${signal.sinr} dB", qualityFromRange(signal.sinr.toFloat(), 0f, 24f), MetricKind.Radio),
-            MetricQuality("GNSS", "HDOP ${formatHdop(gnss.fix.hdop)} / ${gnssFixAgeSeconds}s", gnssQuality(gnss.fix.hdop.toFloat(), gnssFixAgeSeconds), MetricKind.Gnss),
+            MetricQuality("GNSS", gnssValueText(gnss, gnssAgeSeconds, gnssUsability), gnssUsability.quality, MetricKind.Gnss, gnssUsability.isUsable),
         )
     }
 
@@ -30,12 +32,15 @@ data class ScannerTelemetrySnapshot(
         qualityFromRange(signal.sinr.toFloat(), 0f, 24f),
     )
 
-    private fun currentGnssFixAgeSeconds(now: Instant): Int {
-        val elapsedSinceSnapshot = Duration
+    private fun currentGnssFixAgeSeconds(now: Instant): Int =
+        currentGnssFixAgeSecondsFloat(now).toInt()
+
+    private fun currentGnssFixAgeSecondsFloat(now: Instant): Float {
+        val elapsedSinceSnapshotMillis = Duration
             .between(gnss.receivedAt, now)
-            .seconds
+            .toMillis()
             .coerceAtLeast(0L)
-        return (gnss.fixAgeSeconds + elapsedSinceSnapshot).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        return (gnss.fixAgeSeconds + elapsedSinceSnapshotMillis / 1_000f).coerceAtLeast(0f)
     }
 
     companion object {
@@ -78,13 +83,52 @@ data class ScannerTelemetrySnapshot(
         private fun qualityFromRange(value: Float, poor: Float, excellent: Float): Float =
             ((value - poor) / (excellent - poor)).coerceIn(0f, 1f)
 
-        private fun gnssQuality(hdop: Float, ageSeconds: Int): Float {
-            val precision = (1f - ((hdop - 0.7f) / 3.3f)).coerceIn(0f, 1f)
-            val freshness = (1f - ((ageSeconds - 2f) / 28f)).coerceIn(0f, 1f)
-            return (precision * 0.7f + freshness * 0.3f).coerceIn(0f, 1f)
+        private fun gnssUsability(gnss: GnssTelemetry, ageSeconds: Float): GnssUsability {
+            val maxAgeSeconds = maxUsableFixAgeSeconds(gnss.fix.speed)
+            val freshness = (1f - (ageSeconds / maxAgeSeconds)).coerceIn(0f, 1f)
+            val accuracy = gnss.horizontalAccuracyMeters?.let { accuracyMeters ->
+                (1f - ((accuracyMeters - EXCELLENT_ACCURACY_METERS) / (MAX_USABLE_ACCURACY_METERS - EXCELLENT_ACCURACY_METERS))).coerceIn(0f, 1f)
+            } ?: 0.55f
+            val hdop = (1f - ((gnss.fix.hdop.toFloat() - EXCELLENT_HDOP) / (MAX_USABLE_HDOP - EXCELLENT_HDOP))).coerceIn(0f, 1f)
+            val precision = (accuracy * 0.82f + hdop * 0.18f).coerceIn(0f, 1f)
+            val isUsable = ageSeconds < maxAgeSeconds &&
+                (gnss.horizontalAccuracyMeters == null || gnss.horizontalAccuracyMeters <= MAX_USABLE_ACCURACY_METERS) &&
+                gnss.fix.hdop <= MAX_USABLE_HDOP
+            return GnssUsability(
+                quality = if (isUsable) (freshness * precision).coerceIn(0f, 1f) else 0f,
+                isUsable = isUsable,
+                reason = when {
+                    ageSeconds >= maxAgeSeconds -> "Fix too old"
+                    gnss.horizontalAccuracyMeters != null && gnss.horizontalAccuracyMeters > MAX_USABLE_ACCURACY_METERS -> "Too imprecise"
+                    gnss.fix.hdop > MAX_USABLE_HDOP -> "Weak fix"
+                    else -> null
+                },
+            )
         }
 
-        private fun formatHdop(hdop: Double): String =
-            String.format("%.1f", hdop)
+        private fun gnssValueText(gnss: GnssTelemetry, ageSeconds: Int, usability: GnssUsability): String =
+            usability.reason ?: "${formatHorizontalAccuracy(gnss.horizontalAccuracyMeters)} ${ageSeconds}s ago"
+
+        private fun maxUsableFixAgeSeconds(speedMetersPerSecond: Double?): Float =
+            when {
+                speedMetersPerSecond == null -> 10f
+                speedMetersPerSecond >= 10.0 -> 5f
+                speedMetersPerSecond >= 2.0 -> 10f
+                else -> 30f
+            }
+
+        private const val EXCELLENT_ACCURACY_METERS = 5f
+        private const val MAX_USABLE_ACCURACY_METERS = 50f
+        private const val EXCELLENT_HDOP = 0.7f
+        private const val MAX_USABLE_HDOP = 4.0f
+
+        private fun formatHorizontalAccuracy(horizontalAccuracyMeters: Float?): String =
+            horizontalAccuracyMeters?.let { "±${it.toInt()}m" } ?: "±?m"
+
+        private data class GnssUsability(
+            val quality: Float,
+            val isUsable: Boolean,
+            val reason: String?,
+        )
     }
 }

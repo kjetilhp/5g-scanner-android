@@ -67,7 +67,7 @@ The emulator build currently uses mock telemetry. It supports:
 
 - Blocking first-run consent before scanner controls are shown
 - Grant app-level consent
-- Automatic mock scanning after consent through mock radio and mock GNSS sources
+- Automatic mock scanning after consent through a foreground scanner service with mock radio and mock GNSS sources
 - Daily JSONL log files written under `Documents/Ask/` on shared storage
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
@@ -124,6 +124,8 @@ RadioTelemetrySource + GnssTelemetrySource
 
 Mock radio/GNSS sources are active for emulator development. Android radio/GNSS source classes exist as placeholders for the future public API collectors.
 
+Active scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
+
 ## Location Mode and Quality
 
 Location mode controls how aggressively the future Android GNSS/location source should request fixes. It does not lower the quality bar for coverage logs.
@@ -151,6 +153,8 @@ fix age <= 5 s when speed is at least 10 m/s
 ```
 
 This means the app should save battery by collecting fewer usable samples, not by accepting stale or imprecise locations. The emulator mock intentionally emits a bad location every sixth sample so this rejection path can be exercised without a physical phone.
+
+The scanner keeps the newest reported GNSS fix separate from the newest usable GNSS fix. If Android reports a newer but worse location, the scanner can continue pairing radio samples with the previous usable fix until that fix ages out. The main UI shows the usable location state: `GNSS` displays accuracy and age while usable, and switches to reasons such as `Fix too old`, `Too imprecise`, or `Weak fix` when location is no longer useful for mapping.
 
 ## Product and Privacy Notes
 

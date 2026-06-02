@@ -5,4 +5,5 @@ data class MetricQuality(
     val valueText: String,
     val quality: Float,
     val kind: MetricKind,
+    val isUsable: Boolean = true,
 )

@@ -3,10 +3,16 @@ package no.politiet.pit
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.animation.AnimatorSet
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.location.LocationManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -14,6 +20,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.DashPathEffect
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
@@ -22,7 +29,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
+import android.net.Uri
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -42,18 +51,11 @@ import android.widget.TextView
 import no.politiet.pit.domain.Cell
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
-import no.politiet.pit.encoding.CoverageSampleJsonEncoder
 import no.politiet.pit.reporting.ReportingScheduler
 import no.politiet.pit.storage.AppSettingsStore
 import no.politiet.pit.storage.CoverageLogStore
-import no.politiet.pit.telemetry.CoverageSampleAssembler
-import no.politiet.pit.telemetry.CoverageSampleAssembler.AssemblyResult
-import no.politiet.pit.telemetry.GnssTelemetrySource
 import no.politiet.pit.telemetry.MetricKind
 import no.politiet.pit.telemetry.MetricQuality
-import no.politiet.pit.telemetry.MockGnssTelemetrySource
-import no.politiet.pit.telemetry.MockRadioTelemetrySource
-import no.politiet.pit.telemetry.RadioTelemetrySource
 import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
 import java.time.Instant
 import java.time.ZoneId
@@ -68,13 +70,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         .withZone(ZoneId.systemDefault())
 
     private var consentGranted = false
+    private var waitingForInitialPermissions = false
     private var stoppedManually = false
     private var showingSettings = false
     private var settingsDestination = SettingsDestination.Main
     private var selectedCsvTitle: String? = null
     private var selectedCsvText: String? = null
     private var sampleCount = 0
-    private var lastSampleAt: Instant? = null
     private var gnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
     private var lastReportedAt: Instant? = null
@@ -90,39 +92,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var stopStartButton: ImageButton? = null
     private var startButtonPulseAnimator: AnimatorSet? = null
     private var startButtonPulseScheduled = false
+    private var blockerPulseScheduled = false
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var settingsBackCallback: OnBackInvokedCallback? = null
-    private val radioTelemetrySource: RadioTelemetrySource = MockRadioTelemetrySource()
-    private val gnssTelemetrySource: GnssTelemetrySource = MockGnssTelemetrySource()
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
-    private var samplerScheduled = false
     private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
+    private var scannerStateReceiverRegistered = false
     private lateinit var coverageLogStore: CoverageLogStore
     private lateinit var settingsStore: AppSettingsStore
-    private val gnssQualityThresholds = CoverageSampleAssembler.GnssQualityThresholds(
-        maxStationaryFixAgeSeconds = 30,
-        maxSlowFixAgeSeconds = 10,
-        maxFastFixAgeSeconds = 5,
-        slowSpeedMetersPerSecond = 2.0,
-        fastSpeedMetersPerSecond = 10.0,
-        maxHorizontalAccuracyMeters = 50f,
-        maxHdop = 4.0,
-        maxSnapshotAgeSeconds = 30,
-    )
-
-    private val sampler = object : Runnable {
-        override fun run() {
-            samplerScheduled = false
-            if (canSample()) {
-                captureMockSample()
-                scheduleNextSample(SAMPLE_INTERVAL_MS)
-            } else {
-                render()
-            }
-        }
-    }
 
     private val gnssAgeTick = object : Runnable {
         override fun run() {
@@ -158,6 +137,23 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private val blockerPulse = object : Runnable {
+        override fun run() {
+            blockerPulseScheduled = false
+            val panel = telemetryBars
+            val hasActionableBlocker = (scannerAvailability() as? ScannerAvailability.Blocked)
+                ?.reason
+                ?.settingsIntent() != null
+            if (!hasActionableBlocker || showingSettings || panel == null) {
+                stopBlockerPulse()
+                return
+            }
+
+            panel.pulseBlockerIcon()
+            scheduleBlockerPulse()
+        }
+    }
+
     private val settingsRefresh = object : Runnable {
         override fun run() {
             settingsRefreshScheduled = false
@@ -167,11 +163,23 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private val scannerStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ScannerService.ACTION_STATE_CHANGED) return
+            syncScannerStateFromService(animateBars = true)
+            if (!showingSettings) {
+                updateScannerUi()
+            }
+            scheduleSettingsRefresh()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         coverageLogStore = CoverageLogStore(this)
         settingsStore = AppSettingsStore(this)
         loadState()
+        syncScannerStateFromService(animateBars = false)
         Log.d(TAG, "Activity created: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
         logAppliedSettingsOnLaunch()
         ReportingScheduler.appPreferences(this).registerOnSharedPreferenceChangeListener(this)
@@ -183,21 +191,35 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     override fun onResume() {
         super.onResume()
         lastReportedAt = ReportingScheduler.lastReportedAt(this)
+        if (waitingForInitialPermissions && requiredScannerPermissions().all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+            waitingForInitialPermissions = false
+        }
+        if (waitingForInitialPermissions) return
+        registerScannerStateReceiver()
         if (showingSettings) {
             render()
+        } else {
+            ensureSamplerState()
+            updateScannerUi()
         }
+    }
+
+    override fun onPause() {
+        unregisterScannerStateReceiver()
+        super.onPause()
     }
 
     override fun onDestroy() {
         updateSettingsBackCallback(enabled = false)
+        unregisterScannerStateReceiver()
         ReportingScheduler.appPreferences(this).unregisterOnSharedPreferenceChangeListener(this)
-        handler.removeCallbacks(sampler)
         handler.removeCallbacks(gnssAgeTick)
         handler.removeCallbacks(startButtonPulse)
+        handler.removeCallbacks(blockerPulse)
         handler.removeCallbacks(settingsRefresh)
-        samplerScheduled = false
         gnssAgeTickScheduled = false
         startButtonPulseScheduled = false
+        blockerPulseScheduled = false
         settingsRefreshScheduled = false
         startButtonPulseAnimator?.cancel()
         scannerActivityRingAnimator?.cancel()
@@ -208,6 +230,25 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (key != ReportingScheduler.KEY_LAST_REPORTED_AT) return
         handler.post {
             refreshLastReportedAt()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != SCANNER_PERMISSION_REQUEST_CODE) return
+        waitingForInitialPermissions = false
+        Log.d(
+            TAG,
+            "Scanner permissions result: ${permissions.zip(grantResults.asIterable()).joinToString { (permission, result) -> "$permission=${result == PackageManager.PERMISSION_GRANTED}" }}",
+        )
+        registerScannerStateReceiver()
+        ensureSamplerState()
+        if (consentGranted) {
+            render()
         }
     }
 
@@ -337,7 +378,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 Log.d(TAG, "Consent granted")
                 saveState()
                 ensureReportingScheduler()
-                handler.postDelayed({ render() }, CONSENT_TRANSITION_DELAY_MS)
+                if (!requestRequiredScannerPermissions()) {
+                    handler.postDelayed({ render() }, CONSENT_TRANSITION_DELAY_MS)
+                }
             }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -362,6 +405,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         content.addView(scannerTitleBlock())
 
         telemetryBars = TelemetryBarsView().apply {
+            setLiveMetricProvider { latestTelemetry.metrics() }
             setMetrics(latestTelemetry.metrics(), animate = false)
         }
         telemetryHelpButton = measurementHelpButton()
@@ -403,11 +447,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         stopStartButton = scannerIconButton(R.drawable.ic_stop_32, getString(R.string.stop_scanning), dp(56)) {
-            if (!isStopped()) {
-                stopScanning()
-            } else {
-                startScanning()
-            }
+            handleStopStartAction()
         }
 
         scannerActivityRing = ScannerActivityRing()
@@ -754,65 +794,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         rfSignalBackground = null
         stopStartButtonPulse()
         stopStartButton = null
+        stopBlockerPulse()
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
         scannerActivityRing = null
         stopGnssAgeTick()
     }
 
-    private fun captureMockSample() {
-        sampleCount += 1
-        val capturedAt = Instant.now()
-        lastSampleAt = capturedAt
-        val radioTelemetry = radioTelemetrySource.latest(sampleCount, capturedAt)
-        val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode)
-        if (radioTelemetry == null || gnssTelemetry == null) {
-            Log.d(TAG, "Skipped sample: sampleNumber=$sampleCount, hasRadio=${radioTelemetry != null}, hasGnss=${gnssTelemetry != null}")
-            updateScannerUi()
-            scheduleSettingsRefresh()
-            return
-        }
-
-        latestTelemetry = ScannerTelemetrySnapshot(radioTelemetry, gnssTelemetry)
-        Log.d(TAG, "Captured sample: sampleNumber=$sampleCount, capturedAt=$capturedAt, gnssMode=${gnssMode.name}")
-        writeCoverageSample(sampleCount, capturedAt, latestTelemetry)
-        telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
-        scheduleGnssAgeTick()
-        triggerContinuousReporting()
-        updateScannerUi()
-        scheduleSettingsRefresh()
-    }
-
-    private fun writeCoverageSample(sampleNumber: Int, capturedAt: Instant, telemetry: ScannerTelemetrySnapshot) {
-        runCatching {
-            val assemblyResult = CoverageSampleAssembler.servingSample(
-                radio = telemetry.radio,
-                gnss = telemetry.gnss,
-                gnssThresholds = gnssQualityThresholds,
-            )
-            val sample = when (assemblyResult) {
-                is AssemblyResult.Accepted -> assemblyResult.sample
-                is AssemblyResult.Rejected -> {
-                    Log.d(TAG, "Skipped coverage sample: sampleNumber=$sampleNumber, reason=${assemblyResult.reason}")
-                    return@runCatching
-                }
-            }
-            coverageLogStore.append(
-                sampleJson = CoverageSampleJsonEncoder.encode(sample),
-                capturedAt = capturedAt,
-            )
-            Log.d(TAG, "Appended coverage sample: sampleNumber=$sampleNumber, capturedAt=$capturedAt")
-        }.onFailure { error ->
-            Log.e(TAG, "Could not append coverage sample", error)
-        }
-    }
-
     private fun stopScanning() {
         stoppedManually = true
-        handler.removeCallbacks(sampler)
-        samplerScheduled = false
         Log.d(TAG, "Scanner stopped manually")
         saveState()
+        ScannerService.stop(this)
         updateScannerUi()
     }
 
@@ -825,26 +818,36 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun canSample(): Boolean {
-        return consentGranted && !stoppedManually
+        return scannerDesired() &&
+            scannerAvailability() is ScannerAvailability.Available &&
+            ScannerService.currentState.blockedReason == null
     }
 
+    private fun scannerDesired(): Boolean = consentGranted && !stoppedManually
+
     private fun ensureSamplerState() {
-        if (!canSample()) {
-            handler.removeCallbacks(sampler)
-            samplerScheduled = false
+        if (!scannerDesired()) {
+            ScannerService.stop(this)
             stopGnssAgeTick()
-            Log.d(TAG, "Sampler disabled: consentGranted=$consentGranted, scannerStopped=$stoppedManually")
+            Log.d(TAG, "Scanner service disabled: consentGranted=$consentGranted, scannerStopped=$stoppedManually")
             return
         }
-        scheduleNextSample(0L)
+        if (canStartForegroundScannerService()) {
+            ScannerService.start(this)
+        }
         scheduleGnssAgeTick()
     }
 
-    private fun scheduleNextSample(delayMs: Long) {
-        if (samplerScheduled) return
-        samplerScheduled = true
-        Log.d(TAG, "Scheduling next sample: delayMs=$delayMs")
-        handler.postDelayed(sampler, delayMs)
+    private fun canStartForegroundScannerService(): Boolean {
+        val hasLocationPermission = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasLocationPermission) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        return true
     }
 
     private fun scheduleSettingsRefresh() {
@@ -856,12 +859,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun ensureReportingScheduler() {
         Log.d(TAG, "Ensuring reporting scheduler: consentGranted=$consentGranted, reportingMode=${reportingMode.name}")
         ReportingScheduler.schedule(this, consentGranted, reportingMode.name)
-    }
-
-    private fun triggerContinuousReporting() {
-        if (consentGranted && reportingMode == ReportingMode.Continuous) {
-            triggerReporting()
-        }
     }
 
     private fun triggerReporting(onComplete: ((Boolean) -> Unit)? = null) {
@@ -881,35 +878,172 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun updateScannerUi() {
+        val availability = scannerAvailability()
+        val blocked = availability as? ScannerAvailability.Blocked
+        val scannerDesired = scannerDesired()
+        val serviceState = ScannerService.currentState
+        val blockedMessage = if (scannerDesired) serviceState.blockedReason ?: blocked?.reason?.message else null
+        val blockedSettingsIntent = if (scannerDesired) blocked?.reason?.settingsIntent() else null
+        val canSample = scannerDesired && blockedMessage == null
         titleSignalIcon?.setQuality(
-            quality = if (canSample()) latestTelemetry.overallQuality() else 0f,
+            quality = if (canSample) latestTelemetry.overallQuality() else 0f,
             animate = sampleCount > 0,
         )
-        rfSignalBackground?.setScanning(canSample(), latestTelemetry.overallQuality())
-        if (!canSample()) {
-            telemetryBars?.showNoData()
+        rfSignalBackground?.setScanning(canSample, latestTelemetry.overallQuality())
+        if (!canSample) {
+            telemetryBars?.showNoData(
+                message = blockedMessage ?: getString(R.string.no_data),
+                isBlocker = blockedMessage != null,
+            )
+        }
+        telemetryBars?.apply {
+            isClickable = blockedSettingsIntent != null
+            isFocusable = blockedSettingsIntent != null
+            setOnClickListener(blockedSettingsIntent?.let { intent ->
+                View.OnClickListener { openBlockedScannerSettings(intent) }
+            })
         }
         servingCellText?.apply {
-            text = if (canSample()) servingCellSummary(latestTelemetry.radio.servingCell) else getString(R.string.serving_cell_unavailable)
-            alpha = if (canSample()) 1f else 0.56f
+            text = if (canSample) servingCellSummary(latestTelemetry.radio.servingCell) else getString(R.string.serving_cell_unavailable)
+            alpha = if (canSample) 1f else 0.56f
         }
-        telemetryHelpButton?.visibility = if (canSample()) View.VISIBLE else View.GONE
+        telemetryHelpButton?.visibility = if (canSample) View.VISIBLE else View.GONE
         stopStartButton?.apply {
+            isEnabled = true
+            alpha = 1f
             if (isStopped()) {
                 setImageResource(R.drawable.ic_play_arrow_32)
                 contentDescription = getString(R.string.start_scanning)
+                setOnClickListener { handleStopStartAction() }
             } else {
                 setImageResource(R.drawable.ic_stop_32)
                 contentDescription = getString(R.string.stop_scanning)
+                setOnClickListener { handleStopStartAction() }
             }
         }
         updateStartButtonPulse()
-        updateScannerActivityRing(canSample())
-        if (canSample()) {
+        updateBlockerPulse(scannerDesired && blockedSettingsIntent != null)
+        updateScannerActivityRing(canSample)
+        if (canSample) {
             scheduleGnssAgeTick()
         } else {
             stopGnssAgeTick()
         }
+    }
+
+    private fun handleStopStartAction() {
+        if (!isStopped()) {
+            stopScanning()
+        } else {
+            startScanning()
+        }
+    }
+
+    private fun openBlockedScannerSettings(intent: Intent) {
+        runCatching {
+            startActivity(intent)
+        }.onFailure { error ->
+            Log.e(TAG, "Could not open scanner blocker settings", error)
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+    }
+
+    private fun ScannerBlockReason.settingsIntent(): Intent? =
+        when (this) {
+            is ScannerBlockReason.MissingLocationPermission,
+            is ScannerBlockReason.MissingNotificationPermission -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            is ScannerBlockReason.LocationDisabled -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            is ScannerBlockReason.AirplaneModeEnabled -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+            is ScannerBlockReason.TelephonyUnavailable -> null
+        }
+
+    private fun scannerAvailability(): ScannerAvailability {
+        val locationPermissionGranted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!locationPermissionGranted) {
+            return ScannerAvailability.Blocked(ScannerBlockReason.MissingLocationPermission(getString(R.string.scanner_block_missing_location_permission)))
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return ScannerAvailability.Blocked(ScannerBlockReason.MissingNotificationPermission(getString(R.string.scanner_block_missing_notification_permission)))
+        }
+
+        val locationManager = getSystemService(LocationManager::class.java)
+        if (locationManager != null && !locationManager.isLocationEnabled) {
+            return ScannerAvailability.Blocked(ScannerBlockReason.LocationDisabled(getString(R.string.scanner_block_location_disabled)))
+        }
+
+        val airplaneModeEnabled = Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
+        if (airplaneModeEnabled) {
+            return ScannerAvailability.Blocked(ScannerBlockReason.AirplaneModeEnabled(getString(R.string.scanner_block_airplane_mode)))
+        }
+
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
+            return ScannerAvailability.Blocked(ScannerBlockReason.TelephonyUnavailable(getString(R.string.scanner_block_telephony_unavailable)))
+        }
+
+        return ScannerAvailability.Available
+    }
+
+    private fun requestRequiredScannerPermissions(): Boolean {
+        val missingPermissions = requiredScannerPermissions().filter {
+            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isEmpty()) return false
+
+        Log.d(TAG, "Requesting scanner permissions: ${missingPermissions.joinToString()}")
+        waitingForInitialPermissions = true
+        requestPermissions(missingPermissions.toTypedArray(), SCANNER_PERMISSION_REQUEST_CODE)
+        return true
+    }
+
+    private fun requiredScannerPermissions(): List<String> =
+        buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+    private fun syncScannerStateFromService(animateBars: Boolean) {
+        val state = ScannerService.currentState
+        sampleCount = state.sampleCount
+        latestTelemetry = state.latestTelemetry
+        telemetryBars?.let { bars ->
+            if (animateBars) {
+                bars.setMetrics(latestTelemetry.metrics(), animate = true)
+            } else {
+                bars.updateMetrics(latestTelemetry.metrics(), showIfEmpty = true)
+            }
+        }
+        if (state.isRunning) {
+            scheduleGnssAgeTick()
+        }
+    }
+
+    private fun registerScannerStateReceiver() {
+        if (scannerStateReceiverRegistered) return
+        val filter = IntentFilter(ScannerService.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(scannerStateReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(scannerStateReceiver, filter)
+        }
+        scannerStateReceiverRegistered = true
+    }
+
+    private fun unregisterScannerStateReceiver() {
+        if (!scannerStateReceiverRegistered) return
+        runCatching {
+            unregisterReceiver(scannerStateReceiver)
+        }
+        scannerStateReceiverRegistered = false
     }
 
     private fun updateGnssAgeDisplay() {
@@ -929,11 +1063,34 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun updateStartButtonPulse() {
-        if (isStopped() && stopStartButton != null && !showingSettings) {
+        val hasActionableBlocker = (scannerAvailability() as? ScannerAvailability.Blocked)
+            ?.reason
+            ?.settingsIntent() != null
+        if (isStopped() && !hasActionableBlocker && stopStartButton != null && !showingSettings) {
             scheduleStartButtonPulse()
         } else {
             stopStartButtonPulse()
         }
+    }
+
+    private fun updateBlockerPulse(hasActionableBlocker: Boolean) {
+        if (hasActionableBlocker && stopStartButton != null && telemetryBars != null && !showingSettings) {
+            scheduleBlockerPulse()
+        } else {
+            stopBlockerPulse()
+        }
+    }
+
+    private fun scheduleBlockerPulse() {
+        if (blockerPulseScheduled) return
+        blockerPulseScheduled = true
+        handler.postDelayed(blockerPulse, Random.nextLong(3_200L, 6_400L))
+    }
+
+    private fun stopBlockerPulse() {
+        handler.removeCallbacks(blockerPulse)
+        blockerPulseScheduled = false
+        telemetryBars?.clearBlockerIconPulse()
     }
 
     private fun scheduleStartButtonPulse() {
@@ -1406,6 +1563,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
                 Log.d(TAG, "GNSS mode changed: gnssMode=${gnssMode.name}")
                 saveState()
+                ensureSamplerState()
                 dialog.dismiss()
                 render()
             })
@@ -1987,12 +2145,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private inner class TelemetryBarsView : View(this@MainActivity) {
         private var metrics: List<MetricQuality> = emptyList()
         private var showNoData = false
+        private var noDataMessage = getString(R.string.no_data)
+        private var noDataIsBlocker = false
+        private var blockerPulseHighlight = 0f
+        private var blockerHighlightAnimator: ValueAnimator? = null
         private var noDataAlpha = 0f
         private var barsAlpha = 1f
         private var animatedQualities: List<Float> = emptyList()
         private var previousSampleQualities: List<Float> = emptyList()
         private var animatedPreviousQualities: List<Float> = emptyList()
         private var hasComparisonSample = false
+        private var liveMetricProvider: (() -> List<MetricQuality>)? = null
+        private var lastQualityFrameMs = 0L
         private var barAnimator: ValueAnimator? = null
         private var visibilityAnimator: ValueAnimator? = null
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -2002,6 +2166,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         private val gnssPanelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = SCANNER_GNSS_PANEL
             style = Paint.Style.FILL
+        }
+        private val unusableGnssHatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SCANNER_GNSS_UNUSABLE
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1).toFloat()
         }
         private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = SCANNER_GNSS_DIVIDER
@@ -2033,6 +2202,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             textAlign = Paint.Align.CENTER
             textSize = dp(16).toFloat()
         }
+        private val warningDrawable: Drawable? = getDrawable(R.drawable.ic_warning_48)?.mutate()?.apply {
+            setTint(Color.WHITE)
+            alpha = SCANNER_BLOCKER_ICON_ALPHA
+        }
         private val barBounds = RectF()
         private val barClipPath = Path()
         private val gnssPanelPath = Path()
@@ -2042,9 +2215,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             contentDescription = getString(R.string.no_data)
         }
 
+        fun setLiveMetricProvider(provider: (() -> List<MetricQuality>)?) {
+            liveMetricProvider = provider
+        }
+
         fun setMetrics(metrics: List<MetricQuality>, animate: Boolean) {
-            val previousMetrics = this.metrics
-            val previousQualities = animatedQualities.ifEmpty { previousMetrics.map { it.quality } }
+            val previousQualities = displayedQualities()
             setNoDataVisible(false, animate)
             this.metrics = metrics
             contentDescription = metrics.joinToString(separator = ", ") {
@@ -2057,67 +2233,90 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 previousSampleQualities = emptyList()
                 animatedPreviousQualities = emptyList()
                 hasComparisonSample = false
+                lastQualityFrameMs = 0L
                 invalidate()
                 return
             }
 
-            val targetQualities = metrics.map { it.quality }
             val previousMarkerStart = previousSampleQualities
             val previousMarkerEnd = previousQualities
             previousSampleQualities = previousQualities
             hasComparisonSample = previousMarkerStart.isNotEmpty() || sampleCount >= 2
-            barAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 520L
-                interpolator = DecelerateInterpolator()
-                addUpdateListener { animator ->
-                    val progress = animator.animatedValue as Float
-                    animatedQualities = previousQualities.zip(targetQualities) { start, end ->
-                        start + (end - start) * progress
-                    }
-                    animatedPreviousQualities = if (!hasComparisonSample) {
-                        emptyList()
-                    } else if (previousMarkerStart.size == previousMarkerEnd.size) {
-                        previousMarkerStart.zip(previousMarkerEnd) { start, end ->
-                            start + (end - start) * progress
-                        }
-                    } else {
-                        previousMarkerEnd
-                    }
-                    invalidate()
-                }
-                start()
+            animatedPreviousQualities = if (!hasComparisonSample) {
+                emptyList()
+            } else if (previousMarkerStart.size == previousMarkerEnd.size) {
+                previousMarkerEnd
+            } else {
+                previousMarkerEnd
             }
+            invalidate()
         }
 
         fun updateMetrics(metrics: List<MetricQuality>, showIfEmpty: Boolean) {
             if (metrics.isEmpty() && !showIfEmpty) return
             setNoDataVisible(false, animate = false)
             this.metrics = metrics
-            animatedQualities = metrics.map { it.quality }
             contentDescription = metrics.joinToString(separator = ", ") {
                 "${it.label} ${it.valueText}"
+            }
+            if (animatedQualities.size != metrics.size) {
+                animatedQualities = metrics.map { it.quality }
+                lastQualityFrameMs = 0L
             }
             invalidate()
         }
 
-        fun showNoData() {
+        fun showNoData(message: String = getString(R.string.no_data), isBlocker: Boolean = false) {
             barAnimator?.cancel()
             setNoDataVisible(true, animate = true)
+            noDataMessage = message
+            noDataIsBlocker = isBlocker
             metrics = emptyList()
             animatedQualities = emptyList()
             previousSampleQualities = emptyList()
             animatedPreviousQualities = emptyList()
             hasComparisonSample = false
-            contentDescription = getString(R.string.no_data)
+            contentDescription = message
+            invalidate()
+        }
+
+        fun pulseBlockerIcon() {
+            blockerHighlightAnimator?.cancel()
+            blockerPulseHighlight = 1f
+            blockerHighlightAnimator = ValueAnimator.ofFloat(1f, 0f).apply {
+                duration = 1_250L
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    blockerPulseHighlight = animator.animatedValue as Float
+                    invalidate()
+                }
+                start()
+            }
+        }
+
+        fun clearBlockerIconPulse() {
+            blockerHighlightAnimator?.cancel()
+            blockerHighlightAnimator = null
+            blockerPulseHighlight = 0f
             invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            drawBlockerPulseBackground(canvas)
+            refreshLiveMetricsForDraw()
+            updateDisplayedQualitiesForFrame()
             if (showNoData || noDataAlpha > 0f) {
-                val centerY = height / 2f - (emptyPaint.descent() + emptyPaint.ascent()) / 2f
+                val centerY = if (noDataIsBlocker) {
+                    blockerReasonTextBaseline()
+                } else {
+                    height / 2f - (emptyPaint.descent() + emptyPaint.ascent()) / 2f
+                }
+                if (noDataIsBlocker) {
+                    drawBlockerWarningIcon(canvas)
+                }
                 emptyPaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
-                canvas.drawText(getString(R.string.no_data), width / 2f, centerY, emptyPaint)
+                canvas.drawText(noDataMessage, width / 2f, centerY, emptyPaint)
                 emptyPaint.alpha = SCANNER_SOFT_TEXT_ALPHA
             }
             if (metrics.isEmpty() || barsAlpha <= 0f) return
@@ -2131,6 +2330,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             if (hasGnss) {
                 val dividerX = segmentWidth * 3f
                 drawRightRoundedPanel(canvas, dividerX)
+                if (metrics.any { it.kind == MetricKind.Gnss && !it.isUsable }) {
+                    drawUnusableGnssHatch(canvas, dividerX)
+                }
                 dividerPaint.alpha = (SCANNER_GNSS_DIVIDER_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_GNSS_DIVIDER_ALPHA)
                 canvas.drawLine(dividerX, dp(14).toFloat(), dividerX, height - dp(14).toFloat(), dividerPaint)
                 dividerPaint.alpha = SCANNER_GNSS_DIVIDER_ALPHA
@@ -2145,35 +2347,131 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 trackPaint.alpha = (SCANNER_BAR_TRACK_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_BAR_TRACK_ALPHA)
                 canvas.drawRoundRect(barBounds, dp(14).toFloat(), dp(14).toFloat(), trackPaint)
 
-                val animatedQuality = animatedQualities.getOrElse(index) { metric.quality }
-                val fillTop = bottom - availableHeight * animatedQuality
-                fillPaint.color = qualityColor(animatedQuality)
+                val displayQuality = animatedQualities.getOrElse(index) { metric.quality }
+                val fillTop = bottom - availableHeight * displayQuality
+                fillPaint.color = qualityColor(displayQuality)
                 fillPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
                 drawMaskedBarFill(canvas, left, top, right, bottom, fillTop)
 
-                animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
-                    val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
-                    previousPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
-                    canvas.drawLine(left - dp(3), markerY, right + dp(3), markerY, previousPaint)
-                    drawPreviousMarkerArrow(
-                        canvas = canvas,
-                        x = right + dp(8),
-                        y = markerY,
-                        previousQuality = previousQuality,
-                        currentQuality = metric.quality,
-                    )
-                    previousPaint.alpha = 255
+                if (metric.kind == MetricKind.Radio) {
+                    animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
+                        val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
+                        previousPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
+                        canvas.drawLine(left - dp(3), markerY, right + dp(3), markerY, previousPaint)
+                        drawPreviousMarkerArrow(
+                            canvas = canvas,
+                            x = right + dp(8),
+                            y = markerY,
+                            previousQuality = previousQuality,
+                            currentQuality = metric.quality,
+                        )
+                        previousPaint.alpha = 255
+                    }
                 }
 
                 labelPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
+                val previousValueColor = valuePaint.color
+                valuePaint.color = if (metric.kind == MetricKind.Gnss && !metric.isUsable) SCANNER_GNSS_UNUSABLE_TEXT else SCANNER_SOFT_TEXT
                 valuePaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
                 canvas.drawText(metric.label, centerX, height - dp(40).toFloat(), labelPaint)
                 canvas.drawText(metric.valueText, centerX, height - dp(18).toFloat(), valuePaint)
                 labelPaint.alpha = 255
+                valuePaint.color = previousValueColor
                 valuePaint.alpha = SCANNER_SOFT_TEXT_ALPHA
             }
             trackPaint.alpha = SCANNER_BAR_TRACK_ALPHA
             fillPaint.alpha = 255
+            if (!showNoData && shouldKeepAnimatingBars()) {
+                postInvalidateOnAnimation()
+            }
+        }
+
+        private fun drawBlockerPulseBackground(canvas: Canvas) {
+            if (!showNoData || !noDataIsBlocker || blockerPulseHighlight <= 0f) return
+            trackPaint.color = Color.WHITE
+            trackPaint.alpha = (SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA * blockerPulseHighlight * noDataAlpha).toInt()
+                .coerceIn(0, SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA)
+            canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(8).toFloat(), dp(8).toFloat(), trackPaint)
+            trackPaint.color = SCANNER_BAR_TRACK
+            trackPaint.alpha = SCANNER_BAR_TRACK_ALPHA
+        }
+
+        private fun drawBlockerWarningIcon(canvas: Canvas) {
+            val icon = warningDrawable ?: return
+            val baseSize = minOf(width * 0.14f, height * 0.18f).toInt().coerceIn(dp(44), dp(72))
+            val size = baseSize
+            val left = (width - size) / 2
+            val top = blockerIconTop(size)
+            icon.alpha = (SCANNER_BLOCKER_ICON_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_BLOCKER_ICON_ALPHA)
+            icon.setBounds(left, top, left + size, top + size)
+            icon.draw(canvas)
+            icon.alpha = SCANNER_BLOCKER_ICON_ALPHA
+        }
+
+        private fun blockerReasonTextBaseline(): Float {
+            val iconSize = blockerBaseIconSize().toFloat()
+            val gap = dp(14).toFloat()
+            val textHeight = emptyPaint.descent() - emptyPaint.ascent()
+            val blockHeight = iconSize + gap + textHeight
+            val blockTop = height / 2f - blockHeight / 2f
+            return blockTop + iconSize + gap - emptyPaint.ascent()
+        }
+
+        private fun blockerIconTop(size: Int): Int {
+            val iconSize = blockerBaseIconSize().toFloat()
+            val gap = dp(14).toFloat()
+            val textHeight = emptyPaint.descent() - emptyPaint.ascent()
+            val blockHeight = iconSize + gap + textHeight
+            val blockTop = height / 2f - blockHeight / 2f
+            val iconCenterXAlignedTop = blockTop + iconSize / 2f - size / 2f
+            return iconCenterXAlignedTop.toInt()
+        }
+
+        private fun blockerBaseIconSize(): Int =
+            minOf(width * 0.14f, height * 0.18f).toInt().coerceIn(dp(44), dp(72))
+
+        private fun refreshLiveMetricsForDraw() {
+            if (showNoData) return
+            val liveMetrics = liveMetricProvider?.invoke() ?: return
+            if (liveMetrics.isEmpty()) return
+            if (liveMetrics.size != metrics.size) {
+                metrics = liveMetrics
+                animatedQualities = liveMetrics.map { it.quality }
+                lastQualityFrameMs = 0L
+                return
+            }
+            metrics = liveMetrics
+        }
+
+        private fun updateDisplayedQualitiesForFrame() {
+            if (metrics.isEmpty()) return
+            val targets = metrics.map { it.quality }
+            if (animatedQualities.size != targets.size) {
+                animatedQualities = targets
+                lastQualityFrameMs = SystemClock.uptimeMillis()
+                return
+            }
+
+            val nowMs = SystemClock.uptimeMillis()
+            val elapsedMs = if (lastQualityFrameMs == 0L) QUALITY_ANIMATION_FRAME_MS else (nowMs - lastQualityFrameMs).coerceAtLeast(0L)
+            lastQualityFrameMs = nowMs
+            val progress = (elapsedMs.toFloat() / QUALITY_ANIMATION_DURATION_MS).coerceIn(0f, 1f)
+            if (progress <= 0f) return
+
+            animatedQualities = animatedQualities.zip(targets) { displayed, target ->
+                val next = displayed + (target - displayed) * progress
+                if (kotlin.math.abs(next - target) < 0.002f) target else next
+            }
+        }
+
+        private fun displayedQualities(): List<Float> =
+            animatedQualities.ifEmpty { metrics.map { it.quality } }
+
+        private fun shouldKeepAnimatingBars(): Boolean {
+            val targets = metrics.map { it.quality }
+            return animatedQualities.size != targets.size ||
+                animatedQualities.zip(targets).any { (displayed, target) -> kotlin.math.abs(displayed - target) > 0.002f } ||
+                metrics.any { it.kind == MetricKind.Gnss }
         }
 
         private fun setNoDataVisible(visible: Boolean, animate: Boolean) {
@@ -2221,6 +2519,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             gnssPanelPaint.alpha = (SCANNER_GNSS_PANEL_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_GNSS_PANEL_ALPHA)
             canvas.drawPath(gnssPanelPath, gnssPanelPaint)
             gnssPanelPaint.alpha = SCANNER_GNSS_PANEL_ALPHA
+        }
+
+        private fun drawUnusableGnssHatch(canvas: Canvas, left: Float) {
+            val checkpoint = canvas.save()
+            canvas.clipRect(left, 0f, width.toFloat(), height.toFloat())
+            unusableGnssHatchPaint.alpha = (SCANNER_GNSS_UNUSABLE_ALPHA * barsAlpha).toInt().coerceIn(0, SCANNER_GNSS_UNUSABLE_ALPHA)
+            val spacing = dp(12).toFloat()
+            var x = left - height.toFloat()
+            while (x < width + height) {
+                canvas.drawLine(x, height.toFloat(), x + height.toFloat(), 0f, unusableGnssHatchPaint)
+                x += spacing
+            }
+            unusableGnssHatchPaint.alpha = SCANNER_GNSS_UNUSABLE_ALPHA
+            canvas.restoreToCount(checkpoint)
         }
 
         private fun drawMaskedBarFill(
@@ -2369,17 +2681,34 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         Back,
     }
 
+    private sealed interface ScannerAvailability {
+        data object Available : ScannerAvailability
+        data class Blocked(val reason: ScannerBlockReason) : ScannerAvailability
+    }
+
+    private sealed class ScannerBlockReason(val message: String) {
+        class MissingLocationPermission(message: String) : ScannerBlockReason(message)
+        class MissingNotificationPermission(message: String) : ScannerBlockReason(message)
+        class LocationDisabled(message: String) : ScannerBlockReason(message)
+        class AirplaneModeEnabled(message: String) : ScannerBlockReason(message)
+        class TelephonyUnavailable(message: String) : ScannerBlockReason(message)
+    }
+
     private companion object {
         const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
-        const val SAMPLE_INTERVAL_MS = 15_000L
+        const val SCANNER_PERMISSION_REQUEST_CODE = 7001
         const val GNSS_AGE_TICK_MS = 1_000L
+        const val QUALITY_ANIMATION_DURATION_MS = 420L
+        const val QUALITY_ANIMATION_FRAME_MS = 16L
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
         val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)
         val SCANNER_SOFT_TEXT: Int = Color.argb(204, 255, 255, 255)
         const val SCANNER_SOFT_TEXT_ALPHA: Int = 204
         val SCANNER_BUTTON_RIPPLE: Int = Color.argb(31, 15, 118, 110)
         val SCANNER_RING: Int = Color.argb(178, 255, 255, 255)
+        const val SCANNER_BLOCKER_ICON_ALPHA: Int = 218
+        const val SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA: Int = 46
         const val SCANNER_RF_WAVE_ALPHA: Int = 56
         const val SCANNER_RF_BAR_ALPHA: Int = 42
         const val SCANNER_RF_STATIC_ALPHA: Int = 62
@@ -2392,6 +2721,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val SCANNER_GNSS_PANEL_ALPHA: Int = 34
         val SCANNER_GNSS_DIVIDER: Int = Color.argb(138, 255, 255, 255)
         const val SCANNER_GNSS_DIVIDER_ALPHA: Int = 138
+        val SCANNER_GNSS_UNUSABLE: Int = Color.rgb(254, 202, 202)
+        const val SCANNER_GNSS_UNUSABLE_ALPHA: Int = 112
+        val SCANNER_GNSS_UNUSABLE_TEXT: Int = Color.rgb(254, 226, 226)
         val SCANNER_QUALITY_LOW: Int = Color.rgb(248, 113, 113)
         val SCANNER_QUALITY_MEDIUM: Int = Color.rgb(250, 204, 21)
         val SCANNER_QUALITY_HIGH: Int = Color.rgb(134, 239, 172)
