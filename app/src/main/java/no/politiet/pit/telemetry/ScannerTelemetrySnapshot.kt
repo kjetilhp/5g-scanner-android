@@ -3,19 +3,21 @@ package no.politiet.pit.telemetry
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.LteCell
 import no.politiet.pit.domain.Signal
+import java.time.Duration
 import java.time.Instant
 
 data class ScannerTelemetrySnapshot(
     val radio: RadioTelemetry,
     val gnss: GnssTelemetry,
 ) {
-    fun metrics(): List<MetricQuality> {
+    fun metrics(now: Instant = Instant.now()): List<MetricQuality> {
         val signal = radio.servingCell.signal
+        val gnssFixAgeSeconds = currentGnssFixAgeSeconds(now)
         return listOf(
             MetricQuality("RSRP", "${signal.rsrp} dBm", qualityFromRange(signal.rsrp.toFloat(), -118f, -82f), MetricKind.Radio),
             MetricQuality("RSRQ", "${signal.rsrq} dB", qualityFromRange(signal.rsrq.toFloat(), -20f, -8f), MetricKind.Radio),
             MetricQuality("SINR", "${signal.sinr} dB", qualityFromRange(signal.sinr.toFloat(), 0f, 24f), MetricKind.Radio),
-            MetricQuality("GNSS", "HDOP ${formatHdop(gnss.fix.hdop)} / ${gnss.fixAgeSeconds}s", gnssQuality(gnss.fix.hdop.toFloat(), gnss.fixAgeSeconds), MetricKind.Gnss),
+            MetricQuality("GNSS", "HDOP ${formatHdop(gnss.fix.hdop)} / ${gnssFixAgeSeconds}s", gnssQuality(gnss.fix.hdop.toFloat(), gnssFixAgeSeconds), MetricKind.Gnss),
         )
     }
 
@@ -27,6 +29,14 @@ data class ScannerTelemetrySnapshot(
         qualityFromRange(signal.rsrq.toFloat(), -20f, -8f),
         qualityFromRange(signal.sinr.toFloat(), 0f, 24f),
     )
+
+    private fun currentGnssFixAgeSeconds(now: Instant): Int {
+        val elapsedSinceSnapshot = Duration
+            .between(gnss.receivedAt, now)
+            .seconds
+            .coerceAtLeast(0L)
+        return (gnss.fixAgeSeconds + elapsedSinceSnapshot).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
 
     companion object {
         fun initial(gnssMode: GnssMode): ScannerTelemetrySnapshot {

@@ -2,9 +2,7 @@
 
 ## Project Intent
 
-This repo will contain an Android/Kotlin 5G/LTE coverage scanner app. The app should collect phone connectivity, cellular radio, and location data after user-granted permissions, then emit logs compatible with the existing Node/TypeScript scanner.
-
-The Android app name is `Ask`, and the application id/package namespace is `no.politiet.pit`.
+An Android/Kotlin 5G/LTE coverage scanner app. The app collecta phone connectivity, cellular radio, and location data after user-granted permissions, then emit logs compatible with the existing Node/TypeScript scanner.
 
 The reference scanner lives at:
 

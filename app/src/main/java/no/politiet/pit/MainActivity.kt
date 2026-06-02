@@ -97,6 +97,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private val gnssTelemetrySource: GnssTelemetrySource = MockGnssTelemetrySource()
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
     private var samplerScheduled = false
+    private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
     private lateinit var coverageLogStore: CoverageLogStore
     private lateinit var settingsStore: AppSettingsStore
@@ -120,6 +121,14 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             } else {
                 render()
             }
+        }
+    }
+
+    private val gnssAgeTick = object : Runnable {
+        override fun run() {
+            gnssAgeTickScheduled = false
+            updateGnssAgeDisplay()
+            scheduleGnssAgeTick()
         }
     }
 
@@ -183,9 +192,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         updateSettingsBackCallback(enabled = false)
         ReportingScheduler.appPreferences(this).unregisterOnSharedPreferenceChangeListener(this)
         handler.removeCallbacks(sampler)
+        handler.removeCallbacks(gnssAgeTick)
         handler.removeCallbacks(startButtonPulse)
         handler.removeCallbacks(settingsRefresh)
         samplerScheduled = false
+        gnssAgeTickScheduled = false
         startButtonPulseScheduled = false
         settingsRefreshScheduled = false
         startButtonPulseAnimator?.cancel()
@@ -746,6 +757,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
         scannerActivityRing = null
+        stopGnssAgeTick()
     }
 
     private fun captureMockSample() {
@@ -765,6 +777,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         Log.d(TAG, "Captured sample: sampleNumber=$sampleCount, capturedAt=$capturedAt, gnssMode=${gnssMode.name}")
         writeCoverageSample(sampleCount, capturedAt, latestTelemetry)
         telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
+        scheduleGnssAgeTick()
         triggerContinuousReporting()
         updateScannerUi()
         scheduleSettingsRefresh()
@@ -819,10 +832,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (!canSample()) {
             handler.removeCallbacks(sampler)
             samplerScheduled = false
+            stopGnssAgeTick()
             Log.d(TAG, "Sampler disabled: consentGranted=$consentGranted, scannerStopped=$stoppedManually")
             return
         }
         scheduleNextSample(0L)
+        scheduleGnssAgeTick()
     }
 
     private fun scheduleNextSample(delayMs: Long) {
@@ -890,6 +905,27 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
         updateStartButtonPulse()
         updateScannerActivityRing(canSample())
+        if (canSample()) {
+            scheduleGnssAgeTick()
+        } else {
+            stopGnssAgeTick()
+        }
+    }
+
+    private fun updateGnssAgeDisplay() {
+        if (!canSample() || showingSettings) return
+        telemetryBars?.updateMetrics(latestTelemetry.metrics(), showIfEmpty = false)
+    }
+
+    private fun scheduleGnssAgeTick() {
+        if (!canSample() || showingSettings || telemetryBars == null || gnssAgeTickScheduled) return
+        gnssAgeTickScheduled = true
+        handler.postDelayed(gnssAgeTick, GNSS_AGE_TICK_MS)
+    }
+
+    private fun stopGnssAgeTick() {
+        handler.removeCallbacks(gnssAgeTick)
+        gnssAgeTickScheduled = false
     }
 
     private fun updateStartButtonPulse() {
@@ -2053,6 +2089,17 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
         }
 
+        fun updateMetrics(metrics: List<MetricQuality>, showIfEmpty: Boolean) {
+            if (metrics.isEmpty() && !showIfEmpty) return
+            setNoDataVisible(false, animate = false)
+            this.metrics = metrics
+            animatedQualities = metrics.map { it.quality }
+            contentDescription = metrics.joinToString(separator = ", ") {
+                "${it.label} ${it.valueText}"
+            }
+            invalidate()
+        }
+
         fun showNoData() {
             barAnimator?.cancel()
             setNoDataVisible(true, animate = true)
@@ -2326,6 +2373,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val TAG = "AskScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
         const val SAMPLE_INTERVAL_MS = 15_000L
+        const val GNSS_AGE_TICK_MS = 1_000L
         val SCANNER_BACKGROUND: Int = Color.rgb(15, 118, 110)
         val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)
         val SCANNER_SOFT_TEXT: Int = Color.argb(204, 255, 255, 255)

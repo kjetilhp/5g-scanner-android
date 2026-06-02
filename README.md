@@ -8,8 +8,6 @@ The goal is to turn an Android phone into a 5G/LTE coverage sensor: after the us
 
 Planning and project setup plus a simulator-friendly Android scanner prototype.
 
-The Android app name is `Ask`, and the package/application id is `no.politiet.pit`.
-
 The current product direction is a small, consent-led scanner app: the user voluntarily participates in scanning, can stop and start it, and can stop participating by uninstalling the app. Logging is local-first, with reporting controlled by the app's reporting setting.
 
 ## Reference Project
