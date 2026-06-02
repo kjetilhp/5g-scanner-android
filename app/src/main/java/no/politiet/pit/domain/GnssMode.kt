@@ -1,8 +1,9 @@
 package no.politiet.pit.domain
 
 enum class GnssMode(val label: String, val summary: String) {
-    Balanced("Balanced", "Use location with moderate power impact"),
-    HighAccuracy("High accuracy", "Prefer the most precise available location");
+    Balanced("Balanced", "Saves battery when still or moving slowly, then asks for fresher fixes while driving"),
+    HighAccuracy("High accuracy", "Best for active mapping and driving, with higher battery use"),
+    LowPower("Low power", "Uses fewer location updates; some driving samples may be skipped");
 
     companion object {
         fun fromName(value: String?): GnssMode =

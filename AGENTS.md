@@ -48,7 +48,11 @@ Expect to use:
 
 The initial app is intentionally minimal: one native Android Activity with no Compose, AndroidX, or third-party dependencies. Add dependencies only when they pull real weight for the scanner, consent flow, or app ergonomics.
 
+The Android app should compile and target Android 16/API 36, with Android 10/API 29 as the minimum supported version for the intended modern 5G-capable device fleet.
+
 Simulator-friendly work should use mock telemetry. Do not block UI/state progress on real cellular APIs while a physical device is unavailable.
+
+Keep radio and GNSS collection separate. Implement mock and Android collectors behind source-facing interfaces, then pair radio telemetry with the latest acceptable GNSS fix in an assembler before JSONL encoding.
 
 Cellular data availability varies by Android version, phone model, modem, carrier, SIM state, and granted permissions. Avoid assuming every metric is always present.
 

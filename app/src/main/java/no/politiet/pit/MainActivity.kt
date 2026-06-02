@@ -36,17 +36,24 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
-import no.politiet.pit.encoding.MockCoverageSampleJsonEncoder
+import no.politiet.pit.encoding.CoverageSampleJsonEncoder
 import no.politiet.pit.reporting.ReportingScheduler
 import no.politiet.pit.storage.AppSettingsStore
 import no.politiet.pit.storage.CoverageLogStore
+import no.politiet.pit.telemetry.CoverageSampleAssembler
+import no.politiet.pit.telemetry.CoverageSampleAssembler.AssemblyResult
+import no.politiet.pit.telemetry.GnssTelemetrySource
 import no.politiet.pit.telemetry.MetricKind
 import no.politiet.pit.telemetry.MetricQuality
-import no.politiet.pit.telemetry.MockTelemetry
+import no.politiet.pit.telemetry.MockGnssTelemetrySource
+import no.politiet.pit.telemetry.MockRadioTelemetrySource
+import no.politiet.pit.telemetry.RadioTelemetrySource
+import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -81,11 +88,23 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var settingsBackCallback: OnBackInvokedCallback? = null
-    private var latestTelemetry = MockTelemetry.initial(gnssMode)
+    private val radioTelemetrySource: RadioTelemetrySource = MockRadioTelemetrySource()
+    private val gnssTelemetrySource: GnssTelemetrySource = MockGnssTelemetrySource()
+    private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
     private var samplerScheduled = false
     private var settingsRefreshScheduled = false
     private lateinit var coverageLogStore: CoverageLogStore
     private lateinit var settingsStore: AppSettingsStore
+    private val gnssQualityThresholds = CoverageSampleAssembler.GnssQualityThresholds(
+        maxStationaryFixAgeSeconds = 30,
+        maxSlowFixAgeSeconds = 10,
+        maxFastFixAgeSeconds = 5,
+        slowSpeedMetersPerSecond = 2.0,
+        fastSpeedMetersPerSecond = 10.0,
+        maxHorizontalAccuracyMeters = 50f,
+        maxHdop = 4.0,
+        maxSnapshotAgeSeconds = 30,
+    )
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -200,6 +219,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 render(ScreenTransition.Back)
                 true
             }
+            showingSettings && settingsDestination == SettingsDestination.About -> {
+                Log.d(TAG, "Back pressed: about -> settings")
+                settingsDestination = SettingsDestination.Main
+                render(ScreenTransition.Back)
+                true
+            }
             showingSettings -> {
                 Log.d(TAG, "Back pressed: settings -> scanner")
                 showingSettings = false
@@ -237,6 +262,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 SettingsDestination.Main -> createSettingsView()
                 SettingsDestination.LogList -> createLogListView()
                 SettingsDestination.CsvPreview -> createCsvPreviewView()
+                SettingsDestination.About -> createAboutView()
             }
             else -> createScannerView()
         }
@@ -429,14 +455,25 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 sendNow()
             })
         }
+        reportingRows.add(settingsDestructiveActionRow(
+            title = getString(R.string.delete_all_logs_title),
+            summary = getString(R.string.delete_all_logs_summary),
+        ) {
+            confirmDeleteAllLogs()
+        })
         content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
         content.addView(settingsGroup(*reportingRows.toTypedArray()))
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_about)))
         content.addView(settingsGroup(
-            settingsParagraphRow(
-                getString(R.string.setting_about_summary),
-            ),
+            settingsActionRow(
+                title = getString(R.string.setting_about_title),
+                summary = getString(R.string.setting_about_summary),
+            ) {
+                Log.d(TAG, "Opening About")
+                settingsDestination = SettingsDestination.About
+                render(ScreenTransition.Forward)
+            },
         ))
 
         val scroller = ScrollView(this).apply {
@@ -492,15 +529,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 }
             }
             content.addView(settingsGroup(*rows.toTypedArray()))
-            content.addView(settingsSectionLabel(getString(R.string.coverage_logs_actions_section)))
-            content.addView(settingsGroup(
-                settingsDestructiveActionRow(
-                    title = getString(R.string.delete_all_logs_title),
-                    summary = getString(R.string.delete_all_logs_summary),
-                ) {
-                    confirmDeleteAllLogs()
-                },
-            ))
         }
 
         return settingsScreen(
@@ -523,7 +551,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setPositiveButton(getString(R.string.delete_all_logs_confirm_action)) { _, _ ->
                 coverageLogStore.deleteAllLogs()
                 Log.d(TAG, "Deleted all local coverage logs")
-                settingsDestination = SettingsDestination.LogList
                 render()
             }
             .show()
@@ -620,10 +647,78 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         )
     }
 
+    private fun createAboutView(): View {
+        clearScannerViews()
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(32))
+        }
+
+        content.addView(aboutSection(
+            title = getString(R.string.about_intro_title),
+            body = getString(R.string.about_intro_body),
+        ))
+        content.addView(aboutSection(
+            title = getString(R.string.about_data_title),
+            body = getString(R.string.about_data_body),
+        ))
+        content.addView(aboutSection(
+            title = getString(R.string.about_privacy_title),
+            body = getString(R.string.about_privacy_body),
+        ))
+        content.addView(aboutSection(
+            title = getString(R.string.about_storage_title),
+            body = getString(R.string.about_storage_body),
+        ))
+        content.addView(aboutSection(
+            title = getString(R.string.about_participation_title),
+            body = getString(R.string.about_participation_body),
+        ))
+        content.addView(aboutSection(
+            title = getString(R.string.about_app_title),
+            body = getString(
+                R.string.about_app_body,
+                packageInfoVersionName(),
+                packageName,
+            ),
+        ))
+
+        return settingsScreen(
+            title = getString(R.string.setting_about_title),
+            backDescription = getString(R.string.back_to_settings),
+            onBack = {
+                settingsDestination = SettingsDestination.Main
+                render(ScreenTransition.Back)
+            },
+            body = content,
+        )
+    }
+
     private fun clearSelectedCsvPreview() {
         selectedCsvTitle = null
         selectedCsvText = null
     }
+
+    private fun aboutSection(title: String, body: String): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(settingsSectionLabel(title))
+            addView(settingsGroup(settingsParagraphRow(body)))
+        }
+
+    private fun packageInfoVersionName(): String =
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(0),
+                ).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }
+        }.getOrNull().orEmpty().ifBlank { "unknown" }
 
     private fun clearScannerViews() {
         telemetryBars = null
@@ -642,19 +737,40 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         sampleCount += 1
         val capturedAt = Instant.now()
         lastSampleAt = capturedAt
-        latestTelemetry = MockTelemetry.fromSample(sampleCount, gnssMode)
-        Log.d(TAG, "Captured mock sample: sampleNumber=$sampleCount, capturedAt=$capturedAt, gnssMode=${gnssMode.name}")
-        writeMockSample(sampleCount, capturedAt, latestTelemetry)
+        val radioTelemetry = radioTelemetrySource.latest(sampleCount, capturedAt)
+        val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode)
+        if (radioTelemetry == null || gnssTelemetry == null) {
+            Log.d(TAG, "Skipped sample: sampleNumber=$sampleCount, hasRadio=${radioTelemetry != null}, hasGnss=${gnssTelemetry != null}")
+            updateScannerUi()
+            scheduleSettingsRefresh()
+            return
+        }
+
+        latestTelemetry = ScannerTelemetrySnapshot(radioTelemetry, gnssTelemetry)
+        Log.d(TAG, "Captured sample: sampleNumber=$sampleCount, capturedAt=$capturedAt, gnssMode=${gnssMode.name}")
+        writeCoverageSample(sampleCount, capturedAt, latestTelemetry)
         telemetryBars?.setMetrics(latestTelemetry.metrics(), animate = true)
         triggerContinuousReporting()
         updateScannerUi()
         scheduleSettingsRefresh()
     }
 
-    private fun writeMockSample(sampleNumber: Int, capturedAt: Instant, telemetry: MockTelemetry) {
+    private fun writeCoverageSample(sampleNumber: Int, capturedAt: Instant, telemetry: ScannerTelemetrySnapshot) {
         runCatching {
+            val assemblyResult = CoverageSampleAssembler.servingSample(
+                radio = telemetry.radio,
+                gnss = telemetry.gnss,
+                gnssThresholds = gnssQualityThresholds,
+            )
+            val sample = when (assemblyResult) {
+                is AssemblyResult.Accepted -> assemblyResult.sample
+                is AssemblyResult.Rejected -> {
+                    Log.d(TAG, "Skipped coverage sample: sampleNumber=$sampleNumber, reason=${assemblyResult.reason}")
+                    return@runCatching
+                }
+            }
             coverageLogStore.append(
-                sampleJson = MockCoverageSampleJsonEncoder.encode(sampleNumber, capturedAt, telemetry),
+                sampleJson = CoverageSampleJsonEncoder.encode(sample),
                 capturedAt = capturedAt,
             )
             Log.d(TAG, "Appended coverage sample: sampleNumber=$sampleNumber, capturedAt=$capturedAt")
@@ -825,7 +941,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         gnssMode = settings.gnssMode
         reportingMode = settings.reportingMode
         lastReportedAt = settings.lastReportedAt
-        latestTelemetry = MockTelemetry.initial(gnssMode)
+        latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
         Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, lastReportedAt=$lastReportedAt")
     }
 
@@ -1204,19 +1320,74 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
     private fun showGnssModeDialog() {
-        val labels = GnssMode.entries.map { it.label }.toTypedArray()
-        AlertDialog.Builder(this)
+        val modes = GnssMode.entries.toList()
+        val dialog = AlertDialog.Builder(this)
             .setTitle(getString(R.string.setting_gnss_mode_title))
-            .setSingleChoiceItems(labels, GnssMode.entries.indexOf(gnssMode)) { dialog, which ->
-                gnssMode = GnssMode.entries[which]
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        modes.forEach { mode ->
+            content.addView(locationModeChoiceRow(mode) {
+                gnssMode = mode
+                latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
                 Log.d(TAG, "GNSS mode changed: gnssMode=${gnssMode.name}")
                 saveState()
                 dialog.dismiss()
                 render()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            })
+        }
+
+        dialog.setView(ScrollView(this).apply {
+            addView(content)
+        })
+        dialog.show()
     }
+
+    private fun locationModeChoiceRow(mode: GnssMode, onSelected: () -> Unit): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = rippleBackground(Color.TRANSPARENT, dp(6))
+            setOnClickListener { onSelected() }
+
+            addView(RadioButton(this@MainActivity).apply {
+                isChecked = mode == gnssMode
+                isClickable = false
+                buttonTintList = ColorStateList.valueOf(SETTINGS_ACCENT)
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                marginEnd = dp(12)
+            })
+
+            val textColumn = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            textColumn.addView(TextView(this@MainActivity).apply {
+                text = mode.label
+                textSize = 16f
+                setTextColor(SETTINGS_TEXT)
+                includeFontPadding = false
+            })
+            textColumn.addView(TextView(this@MainActivity).apply {
+                text = mode.summary
+                textSize = 14f
+                setTextColor(SETTINGS_SUBTLE_TEXT)
+                setPadding(0, dp(4), 0, 0)
+                setLineSpacing(dp(2).toFloat(), 1f)
+            })
+            addView(textColumn, LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f,
+            ))
+        }
 
     private fun showReportingModeDialog() {
         val labels = ReportingMode.entries.map { it.label }.toTypedArray()
@@ -2108,6 +2279,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         Main,
         LogList,
         CsvPreview,
+        About,
     }
 
     private enum class ScreenTransition {

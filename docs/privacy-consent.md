@@ -45,10 +45,13 @@ The first planned scope is:
 - Timestamp data
 - Cellular radio information
 - Connectivity/network state
+- Carrier information
 - Signal metrics where available
-- Device/network metadata needed to interpret samples
+- Device make, OS version, and other device/network metadata needed to interpret samples
 
 Avoid collecting personal account data or contact/user identifiers unless a later feature explicitly requires it and the consent model is updated.
+
+User-facing copy should state that coverage data is intended for coverage mapping and is not intended to identify the participant or be traced back to them.
 
 ## Local-First Reporting
 

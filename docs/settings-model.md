@@ -39,21 +39,25 @@ Sampling cadence is fixed internally in the prototype and should not be shown as
 
 Add cadence controls later only if changing them reliably changes collection behavior on supported phones and the tradeoff can be explained clearly.
 
-### GNSS / Location Mode
+### Location Mode
 
 Start with simple intent-based modes:
 
 ```text
 Balanced
 HighAccuracy
+LowPower
 ```
 
-Optional later modes:
+Modes describe how aggressively the app should request location fixes, not what quality of location is accepted into logs:
 
 ```text
-DeviceOnly
-Passive
+Balanced: adaptive default; save battery when still/slow, request fresher fixes while driving
+HighAccuracy: best for active mapping and driving, with higher battery use
+LowPower: fewer location updates; driving samples may be skipped
 ```
+
+Location quality thresholds stay code-configured in the scanner assembler. The user should not be asked to tune horizontal accuracy, HDOP, or age thresholds.
 
 The implementation can decide later whether to use Android platform location APIs, Google Play Services fused location, or both.
 
