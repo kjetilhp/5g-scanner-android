@@ -61,8 +61,8 @@ The scanner loop is a foreground service. While scanning is active, `ScannerServ
 
 Treat the user's scanner toggle as desired state, not merely as "a service is currently alive". Once the user has consented and started scanning, the app should be as resilient as Android allows:
 
-- Temporary blockers such as flight mode, location disabled, or revoked runtime permissions should pause usable sample production, not erase the user's intent to scan.
-- While blocked, the scanner should keep enough app/service state to report why samples are not being produced.
+- Temporary errors such as flight mode, location disabled, or revoked runtime permissions should pause usable sample production, not erase the user's intent to scan.
+- While in error, the scanner should keep enough app/service state to report why samples are not being produced.
 - When the phone returns to a working condition, such as flight mode off, location enabled, or permissions restored, scanning should resume automatically when Android allows it.
 - Samples should still be skipped rather than logged when radio or GNSS data is missing, stale, or unusable.
 
@@ -72,14 +72,14 @@ The implementation path should separate three concepts:
 scannerDesired
   Persisted user intent: consent is granted and the user has not pressed Stop.
 
-scannerBlocked
-  Current environment prevents useful samples: missing permission, location off, flight mode, no cellular radio, or unusable GNSS.
+scannerError
+  Current environment prevents useful samples while scanning is desired: missing permission, location off, flight mode, no cellular radio, or unusable GNSS.
 
 scannerActive
   The foreground service is currently collecting and can attempt to produce samples.
 ```
 
-The foreground service should not immediately stop just because a temporary blocker appears. Instead, it should pause collection/logging, publish a blocked reason, keep the foreground notification visible with a paused/blocked message, and listen or recheck for relevant guard changes. The foreground notification should use the scanner's active green when samples can be produced and a red warning accent when scanning is desired but blocked. Use receivers/callbacks for airplane-mode changes, location-provider changes, permission rechecks on app resume, and telephony/connectivity changes where Android exposes them. When the blocker clears and `scannerDesired` is still true, the service can resume sampling.
+The foreground service should not immediately stop just because a temporary error appears. Instead, it should pause collection/logging, publish an error reason, keep the foreground notification visible with an error message, and listen or recheck for relevant guard changes. The foreground notification should use the scanner's running green when samples can be produced and a red warning accent when scanning is desired but in error. Use receivers/callbacks for airplane-mode changes, location-provider changes, permission rechecks on app resume, and telephony/connectivity changes where Android exposes them. When the error clears and `scannerDesired` is still true, the service can resume sampling.
 
 Some states remain outside normal resilience: user force-stop, uninstall, app update/reinstall, process death without restart allowance, and reboot. Reboot auto-resume should be treated separately because modern Android may require background-location permission and stronger consent language.
 

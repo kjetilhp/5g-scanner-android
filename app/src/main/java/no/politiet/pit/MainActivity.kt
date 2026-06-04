@@ -96,7 +96,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var stopStartButton: ImageButton? = null
     private var startButtonPulseAnimator: AnimatorSet? = null
     private var startButtonPulseScheduled = false
-    private var blockerPulseScheduled = false
+    private var errorPulseScheduled = false
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
     private var settingsBackCallback: OnBackInvokedCallback? = null
@@ -141,20 +141,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
-    private val blockerPulse = object : Runnable {
+    private val errorPulse = object : Runnable {
         override fun run() {
-            blockerPulseScheduled = false
+            errorPulseScheduled = false
             val panel = telemetryBars
-            val hasActionableBlocker = (scannerAvailability() as? ScannerAvailability.Blocked)
+            val hasActionableError = (scannerAvailability() as? ScannerAvailability.Error)
                 ?.reason
                 ?.settingsIntent() != null
-            if (!hasActionableBlocker || showingSettings || panel == null) {
-                stopBlockerPulse()
+            if (!hasActionableError || showingSettings || panel == null) {
+                stopErrorPulse()
                 return
             }
 
-            panel.pulseBlockerIcon()
-            scheduleBlockerPulse()
+            panel.pulseErrorIcon()
+            scheduleErrorPulse()
         }
     }
 
@@ -219,11 +219,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         ReportingScheduler.appPreferences(this).unregisterOnSharedPreferenceChangeListener(this)
         handler.removeCallbacks(gnssAgeTick)
         handler.removeCallbacks(startButtonPulse)
-        handler.removeCallbacks(blockerPulse)
+        handler.removeCallbacks(errorPulse)
         handler.removeCallbacks(settingsRefresh)
         gnssAgeTickScheduled = false
         startButtonPulseScheduled = false
-        blockerPulseScheduled = false
+        errorPulseScheduled = false
         settingsRefreshScheduled = false
         startButtonPulseAnimator?.cancel()
         scannerActivityRingAnimator?.cancel()
@@ -812,7 +812,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         rfSignalBackground = null
         stopStartButtonPulse()
         stopStartButton = null
-        stopBlockerPulse()
+        stopErrorPulse()
         scannerActivityRingAnimator?.cancel()
         scannerActivityRingAnimator = null
         scannerActivityRing = null
@@ -838,7 +838,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun canSample(): Boolean {
         return scannerDesired() &&
             scannerAvailability() is ScannerAvailability.Available &&
-            ScannerService.currentState.blockedReason == null
+            ScannerService.currentState.errorReason == null
     }
 
     private fun scannerDesired(): Boolean = consentGranted && !stoppedManually
@@ -897,12 +897,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun updateScannerUi() {
         val availability = scannerAvailability()
-        val blocked = availability as? ScannerAvailability.Blocked
+        val error = availability as? ScannerAvailability.Error
         val scannerDesired = scannerDesired()
         val serviceState = ScannerService.currentState
-        val blockedMessage = if (scannerDesired) serviceState.blockedReason ?: blocked?.reason?.message else null
-        val blockedSettingsIntent = if (scannerDesired) blocked?.reason?.settingsIntent() else null
-        val canSample = scannerDesired && blockedMessage == null
+        val errorMessage = if (scannerDesired) serviceState.errorReason ?: error?.reason?.message else null
+        val errorSettingsIntent = if (scannerDesired) error?.reason?.settingsIntent() else null
+        val canSample = scannerDesired && errorMessage == null
         titleSignalIcon?.setQuality(
             quality = if (canSample) latestTelemetry.overallQuality() else 0f,
             animate = sampleCount > 0,
@@ -910,15 +910,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         rfSignalBackground?.setScanning(canSample, latestTelemetry.overallQuality())
         if (!canSample) {
             telemetryBars?.showNoData(
-                message = blockedMessage ?: getString(R.string.no_data),
-                isBlocker = blockedMessage != null,
+                message = errorMessage ?: getString(R.string.no_data),
+                isError = errorMessage != null,
             )
         }
         telemetryBars?.apply {
-            isClickable = blockedSettingsIntent != null
-            isFocusable = blockedSettingsIntent != null
-            setOnClickListener(blockedSettingsIntent?.let { intent ->
-                View.OnClickListener { openBlockedScannerSettings(intent) }
+            isClickable = errorSettingsIntent != null
+            isFocusable = errorSettingsIntent != null
+            setOnClickListener(errorSettingsIntent?.let { intent ->
+                View.OnClickListener { openScannerErrorSettings(intent) }
             })
         }
         servingCellText?.apply {
@@ -940,7 +940,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
         }
         updateStartButtonPulse()
-        updateBlockerPulse(scannerDesired && blockedSettingsIntent != null)
+        updateErrorPulse(scannerDesired && errorSettingsIntent != null)
         updateScannerActivityRing(canSample)
         if (canSample) {
             scheduleGnssAgeTick()
@@ -957,51 +957,51 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
-    private fun openBlockedScannerSettings(intent: Intent) {
+    private fun openScannerErrorSettings(intent: Intent) {
         runCatching {
             startActivity(intent)
         }.onFailure { error ->
-            Log.e(TAG, "Could not open scanner blocker settings", error)
+            Log.e(TAG, "Could not open scanner error settings", error)
             startActivity(Intent(Settings.ACTION_SETTINGS))
         }
     }
 
-    private fun ScannerBlockReason.settingsIntent(): Intent? =
+    private fun ScannerErrorReason.settingsIntent(): Intent? =
         when (this) {
-            is ScannerBlockReason.MissingLocationPermission,
-            is ScannerBlockReason.MissingNotificationPermission -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            is ScannerErrorReason.MissingLocationPermission,
+            is ScannerErrorReason.MissingNotificationPermission -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", packageName, null)
             }
-            is ScannerBlockReason.LocationDisabled -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-            is ScannerBlockReason.AirplaneModeEnabled -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
-            is ScannerBlockReason.TelephonyUnavailable -> null
+            is ScannerErrorReason.LocationDisabled -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            is ScannerErrorReason.AirplaneModeEnabled -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+            is ScannerErrorReason.TelephonyUnavailable -> null
         }
 
     private fun scannerAvailability(): ScannerAvailability {
         val locationPermissionGranted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!locationPermissionGranted) {
-            return ScannerAvailability.Blocked(ScannerBlockReason.MissingLocationPermission(getString(R.string.scanner_block_missing_location_permission)))
+            return ScannerAvailability.Error(ScannerErrorReason.MissingLocationPermission(getString(R.string.scanner_error_missing_location_permission)))
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            return ScannerAvailability.Blocked(ScannerBlockReason.MissingNotificationPermission(getString(R.string.scanner_block_missing_notification_permission)))
+            return ScannerAvailability.Error(ScannerErrorReason.MissingNotificationPermission(getString(R.string.scanner_error_missing_notification_permission)))
         }
 
         val locationManager = getSystemService(LocationManager::class.java)
         if (locationManager != null && !locationManager.isLocationEnabled) {
-            return ScannerAvailability.Blocked(ScannerBlockReason.LocationDisabled(getString(R.string.scanner_block_location_disabled)))
+            return ScannerAvailability.Error(ScannerErrorReason.LocationDisabled(getString(R.string.scanner_error_location_disabled)))
         }
 
         val airplaneModeEnabled = Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
         if (airplaneModeEnabled) {
-            return ScannerAvailability.Blocked(ScannerBlockReason.AirplaneModeEnabled(getString(R.string.scanner_block_airplane_mode)))
+            return ScannerAvailability.Error(ScannerErrorReason.AirplaneModeEnabled(getString(R.string.scanner_error_airplane_mode)))
         }
 
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) {
-            return ScannerAvailability.Blocked(ScannerBlockReason.TelephonyUnavailable(getString(R.string.scanner_block_telephony_unavailable)))
+            return ScannerAvailability.Error(ScannerErrorReason.TelephonyUnavailable(getString(R.string.scanner_error_telephony_unavailable)))
         }
 
         return ScannerAvailability.Available
@@ -1081,34 +1081,34 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun updateStartButtonPulse() {
-        val hasActionableBlocker = (scannerAvailability() as? ScannerAvailability.Blocked)
+        val hasActionableError = (scannerAvailability() as? ScannerAvailability.Error)
             ?.reason
             ?.settingsIntent() != null
-        if (isStopped() && !hasActionableBlocker && stopStartButton != null && !showingSettings) {
+        if (isStopped() && !hasActionableError && stopStartButton != null && !showingSettings) {
             scheduleStartButtonPulse()
         } else {
             stopStartButtonPulse()
         }
     }
 
-    private fun updateBlockerPulse(hasActionableBlocker: Boolean) {
-        if (hasActionableBlocker && stopStartButton != null && telemetryBars != null && !showingSettings) {
-            scheduleBlockerPulse()
+    private fun updateErrorPulse(hasActionableError: Boolean) {
+        if (hasActionableError && stopStartButton != null && telemetryBars != null && !showingSettings) {
+            scheduleErrorPulse()
         } else {
-            stopBlockerPulse()
+            stopErrorPulse()
         }
     }
 
-    private fun scheduleBlockerPulse() {
-        if (blockerPulseScheduled) return
-        blockerPulseScheduled = true
-        handler.postDelayed(blockerPulse, Random.nextLong(3_200L, 6_400L))
+    private fun scheduleErrorPulse() {
+        if (errorPulseScheduled) return
+        errorPulseScheduled = true
+        handler.postDelayed(errorPulse, Random.nextLong(3_200L, 6_400L))
     }
 
-    private fun stopBlockerPulse() {
-        handler.removeCallbacks(blockerPulse)
-        blockerPulseScheduled = false
-        telemetryBars?.clearBlockerIconPulse()
+    private fun stopErrorPulse() {
+        handler.removeCallbacks(errorPulse)
+        errorPulseScheduled = false
+        telemetryBars?.clearErrorIconPulse()
     }
 
     private fun scheduleStartButtonPulse() {
@@ -2197,9 +2197,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         private var metrics: List<MetricQuality> = emptyList()
         private var showNoData = false
         private var noDataMessage = getString(R.string.no_data)
-        private var noDataIsBlocker = false
-        private var blockerPulseHighlight = 0f
-        private var blockerHighlightAnimator: ValueAnimator? = null
+        private var noDataIsError = false
+        private var errorPulseHighlight = 0f
+        private var errorHighlightAnimator: ValueAnimator? = null
         private var noDataAlpha = 0f
         private var barsAlpha = 1f
         private var animatedQualities: List<Float> = emptyList()
@@ -2255,7 +2255,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
         private val warningDrawable: Drawable? = getDrawable(R.drawable.ic_warning_48)?.mutate()?.apply {
             setTint(Color.WHITE)
-            alpha = SCANNER_BLOCKER_ICON_ALPHA
+            alpha = SCANNER_ERROR_ICON_ALPHA
         }
         private val barBounds = RectF()
         private val barClipPath = Path()
@@ -2317,11 +2317,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             invalidate()
         }
 
-        fun showNoData(message: String = getString(R.string.no_data), isBlocker: Boolean = false) {
+        fun showNoData(message: String = getString(R.string.no_data), isError: Boolean = false) {
             barAnimator?.cancel()
             setNoDataVisible(true, animate = true)
             noDataMessage = message
-            noDataIsBlocker = isBlocker
+            noDataIsError = isError
             metrics = emptyList()
             animatedQualities = emptyList()
             previousSampleQualities = emptyList()
@@ -2331,40 +2331,40 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             invalidate()
         }
 
-        fun pulseBlockerIcon() {
-            blockerHighlightAnimator?.cancel()
-            blockerPulseHighlight = 1f
-            blockerHighlightAnimator = ValueAnimator.ofFloat(1f, 0f).apply {
+        fun pulseErrorIcon() {
+            errorHighlightAnimator?.cancel()
+            errorPulseHighlight = 1f
+            errorHighlightAnimator = ValueAnimator.ofFloat(1f, 0f).apply {
                 duration = 1_250L
                 interpolator = DecelerateInterpolator()
                 addUpdateListener { animator ->
-                    blockerPulseHighlight = animator.animatedValue as Float
+                    errorPulseHighlight = animator.animatedValue as Float
                     invalidate()
                 }
                 start()
             }
         }
 
-        fun clearBlockerIconPulse() {
-            blockerHighlightAnimator?.cancel()
-            blockerHighlightAnimator = null
-            blockerPulseHighlight = 0f
+        fun clearErrorIconPulse() {
+            errorHighlightAnimator?.cancel()
+            errorHighlightAnimator = null
+            errorPulseHighlight = 0f
             invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            drawBlockerPulseBackground(canvas)
+            drawErrorPulseBackground(canvas)
             refreshLiveMetricsForDraw()
             updateDisplayedQualitiesForFrame()
             if (showNoData || noDataAlpha > 0f) {
-                val centerY = if (noDataIsBlocker) {
-                    blockerReasonTextBaseline()
+                val centerY = if (noDataIsError) {
+                    errorReasonTextBaseline()
                 } else {
                     height / 2f - (emptyPaint.descent() + emptyPaint.ascent()) / 2f
                 }
-                if (noDataIsBlocker) {
-                    drawBlockerWarningIcon(canvas)
+                if (noDataIsError) {
+                    drawErrorWarningIcon(canvas)
                 }
                 emptyPaint.alpha = (SCANNER_SOFT_TEXT_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_SOFT_TEXT_ALPHA)
                 canvas.drawText(noDataMessage, width / 2f, centerY, emptyPaint)
@@ -2437,30 +2437,30 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
         }
 
-        private fun drawBlockerPulseBackground(canvas: Canvas) {
-            if (!showNoData || !noDataIsBlocker || blockerPulseHighlight <= 0f) return
+        private fun drawErrorPulseBackground(canvas: Canvas) {
+            if (!showNoData || !noDataIsError || errorPulseHighlight <= 0f) return
             trackPaint.color = Color.WHITE
-            trackPaint.alpha = (SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA * blockerPulseHighlight * noDataAlpha).toInt()
-                .coerceIn(0, SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA)
+            trackPaint.alpha = (SCANNER_ERROR_BACKGROUND_PULSE_ALPHA * errorPulseHighlight * noDataAlpha).toInt()
+                .coerceIn(0, SCANNER_ERROR_BACKGROUND_PULSE_ALPHA)
             canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(8).toFloat(), dp(8).toFloat(), trackPaint)
             trackPaint.color = SCANNER_BAR_TRACK
             trackPaint.alpha = SCANNER_BAR_TRACK_ALPHA
         }
 
-        private fun drawBlockerWarningIcon(canvas: Canvas) {
+        private fun drawErrorWarningIcon(canvas: Canvas) {
             val icon = warningDrawable ?: return
             val baseSize = minOf(width * 0.14f, height * 0.18f).toInt().coerceIn(dp(44), dp(72))
             val size = baseSize
             val left = (width - size) / 2
-            val top = blockerIconTop(size)
-            icon.alpha = (SCANNER_BLOCKER_ICON_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_BLOCKER_ICON_ALPHA)
+            val top = errorIconTop(size)
+            icon.alpha = (SCANNER_ERROR_ICON_ALPHA * noDataAlpha).toInt().coerceIn(0, SCANNER_ERROR_ICON_ALPHA)
             icon.setBounds(left, top, left + size, top + size)
             icon.draw(canvas)
-            icon.alpha = SCANNER_BLOCKER_ICON_ALPHA
+            icon.alpha = SCANNER_ERROR_ICON_ALPHA
         }
 
-        private fun blockerReasonTextBaseline(): Float {
-            val iconSize = blockerBaseIconSize().toFloat()
+        private fun errorReasonTextBaseline(): Float {
+            val iconSize = errorBaseIconSize().toFloat()
             val gap = dp(14).toFloat()
             val textHeight = emptyPaint.descent() - emptyPaint.ascent()
             val blockHeight = iconSize + gap + textHeight
@@ -2468,8 +2468,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             return blockTop + iconSize + gap - emptyPaint.ascent()
         }
 
-        private fun blockerIconTop(size: Int): Int {
-            val iconSize = blockerBaseIconSize().toFloat()
+        private fun errorIconTop(size: Int): Int {
+            val iconSize = errorBaseIconSize().toFloat()
             val gap = dp(14).toFloat()
             val textHeight = emptyPaint.descent() - emptyPaint.ascent()
             val blockHeight = iconSize + gap + textHeight
@@ -2478,7 +2478,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             return iconCenterXAlignedTop.toInt()
         }
 
-        private fun blockerBaseIconSize(): Int =
+        private fun errorBaseIconSize(): Int =
             minOf(width * 0.14f, height * 0.18f).toInt().coerceIn(dp(44), dp(72))
 
         private fun refreshLiveMetricsForDraw() {
@@ -2733,15 +2733,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private sealed interface ScannerAvailability {
         data object Available : ScannerAvailability
-        data class Blocked(val reason: ScannerBlockReason) : ScannerAvailability
+        data class Error(val reason: ScannerErrorReason) : ScannerAvailability
     }
 
-    private sealed class ScannerBlockReason(val message: String) {
-        class MissingLocationPermission(message: String) : ScannerBlockReason(message)
-        class MissingNotificationPermission(message: String) : ScannerBlockReason(message)
-        class LocationDisabled(message: String) : ScannerBlockReason(message)
-        class AirplaneModeEnabled(message: String) : ScannerBlockReason(message)
-        class TelephonyUnavailable(message: String) : ScannerBlockReason(message)
+    private sealed class ScannerErrorReason(val message: String) {
+        class MissingLocationPermission(message: String) : ScannerErrorReason(message)
+        class MissingNotificationPermission(message: String) : ScannerErrorReason(message)
+        class LocationDisabled(message: String) : ScannerErrorReason(message)
+        class AirplaneModeEnabled(message: String) : ScannerErrorReason(message)
+        class TelephonyUnavailable(message: String) : ScannerErrorReason(message)
     }
 
     private companion object {
@@ -2759,8 +2759,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val SCANNER_SOFT_TEXT_ALPHA: Int = 204
         val SCANNER_BUTTON_RIPPLE: Int = Color.argb(31, 15, 118, 110)
         val SCANNER_RING: Int = Color.argb(178, 255, 255, 255)
-        const val SCANNER_BLOCKER_ICON_ALPHA: Int = 218
-        const val SCANNER_BLOCKER_BACKGROUND_PULSE_ALPHA: Int = 46
+        const val SCANNER_ERROR_ICON_ALPHA: Int = 218
+        const val SCANNER_ERROR_BACKGROUND_PULSE_ALPHA: Int = 46
         const val SCANNER_RF_WAVE_ALPHA: Int = 56
         const val SCANNER_RF_BAR_ALPHA: Int = 42
         const val SCANNER_RF_STATIC_ALPHA: Int = 62

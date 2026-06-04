@@ -61,12 +61,12 @@ class ScannerService : Service() {
             sampleScheduled = false
             if (!scannerDesired()) {
                 stopScannerService()
-            } else if (scannerBlockReason() == null) {
+            } else if (scannerErrorReason() == null) {
                 captureSample()
                 scheduleNextSample(SAMPLE_INTERVAL_MS)
             } else {
                 publishState()
-                scheduleNextSample(BLOCKED_RECHECK_INTERVAL_MS)
+                scheduleNextSample(ERROR_RECHECK_INTERVAL_MS)
             }
         }
     }
@@ -76,12 +76,12 @@ class ScannerService : Service() {
             gnssRefreshScheduled = false
             if (!scannerDesired()) {
                 stopScannerService()
-            } else if (scannerBlockReason() == null) {
+            } else if (scannerErrorReason() == null) {
                 refreshGnssTelemetry()
                 scheduleGnssRefresh(gnssRefreshIntervalMs())
             } else {
                 publishState()
-                scheduleGnssRefresh(BLOCKED_RECHECK_INTERVAL_MS)
+                scheduleGnssRefresh(ERROR_RECHECK_INTERVAL_MS)
             }
         }
     }
@@ -177,21 +177,21 @@ class ScannerService : Service() {
         return settings.consentGranted && !settings.scannerStopped
     }
 
-    private fun scannerBlockReason(): String? {
+    private fun scannerErrorReason(): String? {
         if (!scannerDesired()) return null
         val hasLocationPermission =
             checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasLocationPermission) return getString(R.string.scanner_block_missing_location_permission)
+        if (!hasLocationPermission) return getString(R.string.scanner_error_missing_location_permission)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            return getString(R.string.scanner_block_missing_notification_permission)
+            return getString(R.string.scanner_error_missing_notification_permission)
         }
         val locationManager = getSystemService(LocationManager::class.java)
-        if (locationManager != null && !locationManager.isLocationEnabled) return getString(R.string.scanner_block_location_disabled)
-        if (Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1) return getString(R.string.scanner_block_airplane_mode)
-        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) return getString(R.string.scanner_block_telephony_unavailable)
+        if (locationManager != null && !locationManager.isLocationEnabled) return getString(R.string.scanner_error_location_disabled)
+        if (Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1) return getString(R.string.scanner_error_airplane_mode)
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)) return getString(R.string.scanner_error_telephony_unavailable)
         return null
     }
 
@@ -214,7 +214,7 @@ class ScannerService : Service() {
     }
 
     private fun refreshGnssTelemetry() {
-        if (!scannerDesired() || scannerBlockReason() != null) return
+        if (!scannerDesired() || scannerErrorReason() != null) return
         loadSettings()
         val capturedAt = Instant.now()
         val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode) ?: return
@@ -290,33 +290,33 @@ class ScannerService : Service() {
         }
 
     private fun publishState() {
-        val blockReason = scannerBlockReason()
+        val errorReason = scannerErrorReason()
         currentState = State(
-            isRunning = true,
-            blockedReason = blockReason,
+            status = if (errorReason == null) ScannerStatus.RUNNING else ScannerStatus.ERROR,
+            errorReason = errorReason,
             mockTelemetryActive = effectiveMockTelemetry,
             sampleCount = sampleCount,
             latestTelemetry = latestTelemetry,
         )
-        updateForegroundNotification(blockReason)
+        updateForegroundNotification(errorReason)
         sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
     }
 
     private fun publishStoppedState() {
-        currentState = currentState.copy(isRunning = false, blockedReason = null)
+        currentState = currentState.copy(status = ScannerStatus.STOPPED, errorReason = null)
         sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
     }
 
     private fun scannerNotification(): Notification {
-        return scannerNotification(scannerBlockReason())
+        return scannerNotification(scannerErrorReason())
     }
 
-    private fun updateForegroundNotification(blockReason: String?) {
+    private fun updateForegroundNotification(errorReason: String?) {
         val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(NOTIFICATION_ID, scannerNotification(blockReason))
+        notificationManager.notify(NOTIFICATION_ID, scannerNotification(errorReason))
     }
 
-    private fun scannerNotification(blockReason: String?): Notification {
+    private fun scannerNotification(errorReason: String?): Notification {
         val openIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -324,15 +324,15 @@ class ScannerService : Service() {
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val blocked = blockReason != null
+        val hasError = errorReason != null
         return Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_warning_48)
-            .setContentTitle(if (blocked) getString(R.string.scanner_notification_blocked_title) else getString(R.string.scanner_notification_title))
-            .setContentText(if (blocked) getString(R.string.scanner_notification_blocked_text, blockReason) else getString(R.string.scanner_notification_text))
+            .setContentTitle(if (hasError) getString(R.string.scanner_notification_error_title) else getString(R.string.scanner_notification_running_title))
+            .setContentText(if (hasError) getString(R.string.scanner_notification_error_text, errorReason) else getString(R.string.scanner_notification_running_text))
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
-            .setColor(if (blocked) SCANNER_BLOCKED_COLOR else SCANNER_ACTIVE_COLOR)
+            .setColor(if (hasError) SCANNER_ERROR_COLOR else SCANNER_RUNNING_COLOR)
             .setBadgeIconType(Notification.BADGE_ICON_SMALL)
             .build()
     }
@@ -345,16 +345,26 @@ class ScannerService : Service() {
             getString(R.string.scanner_notification_channel),
             NotificationManager.IMPORTANCE_LOW,
         )
+        channel.setShowBadge(true)
         manager.createNotificationChannel(channel)
     }
 
+    enum class ScannerStatus {
+        STOPPED,
+        RUNNING,
+        ERROR,
+    }
+
     data class State(
-        val isRunning: Boolean,
-        val blockedReason: String?,
+        val status: ScannerStatus,
+        val errorReason: String?,
         val mockTelemetryActive: Boolean,
         val sampleCount: Int,
         val latestTelemetry: ScannerTelemetrySnapshot,
-    )
+    ) {
+        val isRunning: Boolean
+            get() = status != ScannerStatus.STOPPED
+    }
 
     companion object {
         const val ACTION_START = "no.politiet.pit.ScannerService.START"
@@ -364,14 +374,14 @@ class ScannerService : Service() {
         private const val NOTIFICATION_ID = 4201
         private const val NOTIFICATION_CHANNEL_ID = "scanner"
         private const val SAMPLE_INTERVAL_MS = 15_000L
-        private const val BLOCKED_RECHECK_INTERVAL_MS = 5_000L
-        private val SCANNER_ACTIVE_COLOR = Color.rgb(15, 118, 110)
-        private val SCANNER_BLOCKED_COLOR = Color.rgb(220, 38, 38)
+        private const val ERROR_RECHECK_INTERVAL_MS = 5_000L
+        private val SCANNER_RUNNING_COLOR = Color.rgb(15, 118, 110)
+        private val SCANNER_ERROR_COLOR = Color.rgb(220, 38, 38)
 
         @Volatile
         var currentState: State = State(
-            isRunning = false,
-            blockedReason = null,
+            status = ScannerStatus.STOPPED,
+            errorReason = null,
             mockTelemetryActive = true,
             sampleCount = 0,
             latestTelemetry = ScannerTelemetrySnapshot.initial(GnssMode.Balanced),

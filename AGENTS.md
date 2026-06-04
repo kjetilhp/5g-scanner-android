@@ -63,9 +63,9 @@ Treat the scanner stop/start control as user intent:
 - App-level consent is granted
 - Scanning is not stopped by the user
 
-Temporary blockers such as missing runtime permission, location disabled, flight mode, no cellular radio, or unusable GNSS should pause sample production and surface a clear blocked reason rather than silently converting the scanner to stopped. When the blocker clears and the user intent is still running, the scanner should resume when Android allows it. Force-stop, uninstall, app update/reinstall, process death, and reboot are separate lifecycle cases.
+Temporary errors such as missing runtime permission, location disabled, flight mode, no cellular radio, or unusable GNSS should pause sample production and surface a clear reason rather than silently converting the scanner to stopped. When the error clears and the user intent is still running, the scanner should resume when Android allows it. Force-stop, uninstall, app update/reinstall, process death, and reboot are separate lifecycle cases.
 
-Active scanning should run in a foreground service with a visible notification. The notification should indicate active sample production versus blocked/paused scanning; the UI should mirror the same state and keep the reason/action guard visible.
+Active scanning should run in a foreground service with a visible notification. The scanner state model is stopped, running, or error. Running means active sample production; error means scanning is still desired but samples cannot currently be produced. The UI should mirror the same state and keep the reason/action guard visible.
 
 Initial versions should assume local-first logging. Reporting/upload behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
