@@ -4,6 +4,8 @@ Keep this file practical: near-term tasks, open product questions, and parked id
 
 ---
 
+- Run the device testing checklist before starting real collector work: `docs/device-testing-checklist.md`
+
 - Add an only measure 5g/LTE etc setting? If we ar looking for 5g coverage only, why measure lte? but bot or either is of interrest.
 
 - Make it a true background service that can run for weeks even after reboots. This is the crowdsourcing part...
@@ -21,4 +23,3 @@ Keep this file practical: near-term tasks, open product questions, and parked id
 - Discuss better running/running(error) visualizations: can it be shown in the device toolbar? can we have animation? ux?
 Add a stopped (not running) viz to make it clearer without having to open the app? App notification (dot on app icon) is still purple, not ideal, you said "green accent" what causes this, can we remedy it
 
-- When enhanced privacy, is gnss hdop adjusted accordingly?

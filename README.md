@@ -103,6 +103,8 @@ Useful verification commands:
 .\gradlew.bat testDebugUnitTest
 ```
 
+Before physical-device field testing, run through [docs/device-testing-checklist.md](docs/device-testing-checklist.md).
+
 ## Icon Workflow
 
 The app icon and favicon files are based on a single square SVG source:
