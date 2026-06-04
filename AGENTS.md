@@ -34,7 +34,7 @@ Use these terms consistently in user-facing text, code comments, docs, and imple
 - CSV export: the user-facing export artifact generated from selected database rows.
 - Reporting: sending queued coverage samples according to the reporting setting.
 - JSONL contract: the internal compatibility shape shared with the Node reference scanner. JSONL is not a user-facing export format.
-- Coordinate precision: latitude and longitude are rounded to five decimal places before persistence and display.
+- Coordinate precision: latitude and longitude are rounded to five decimal places for UI display and CSV export. Stored samples keep their original coordinate values.
 - Scanner states: stopped, running, and error.
 
 Avoid obsolete storage terms such as log, log file, daily file, and daily JSONL when describing app persistence. The app no longer stores coverage data as files.

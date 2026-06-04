@@ -115,6 +115,6 @@ sinr: number
 rssi?: number
 ```
 
-Android rounds `lat` and `lon` to five decimal places before persistence and display.
+Android stores `lat` and `lon` as collected in the internal sample JSON. UI display and CSV export round coordinates to five decimal places.
 
 Android devices may omit some signal metrics. When the app implementation begins, decide whether Android-specific partial readings require a compatible extension or a stricter filtering step before sample persistence.

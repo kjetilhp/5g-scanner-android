@@ -1,7 +1,6 @@
 package no.politiet.pit.encoding
 
 import no.politiet.pit.domain.Cell
-import no.politiet.pit.domain.CoordinatePrecision
 import no.politiet.pit.domain.CoverageSample
 import no.politiet.pit.domain.Fix
 import no.politiet.pit.domain.LteCell
@@ -34,8 +33,8 @@ object CoverageSampleJsonEncoder {
         val json = JSONObject()
             .put("timestamp", timestamp.toString())
             .put("gpsTime", gpsTime?.toString() ?: JSONObject.NULL)
-            .put("lat", CoordinatePrecision.rounded(lat))
-            .put("lon", CoordinatePrecision.rounded(lon))
+            .put("lat", lat)
+            .put("lon", lon)
             .put("altitude", altitude)
             .put("hdop", hdop)
             .put("satellites", satellites)
