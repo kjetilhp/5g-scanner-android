@@ -2,13 +2,13 @@
 <resources>
     <string name="app_name">5G-Scanner</string>
     <string name="app_subtitle">5G/LTE coverage scanner</string>
-    <string name="consent_intro">5G-Scanner helps build a coverage map from real phones carried by volunteers. Before it collects anything, it needs your consent.</string>
+    <string name="consent_intro">5G-Scanner helps build an evolving coverage map for 5G/LTE connectivity. Before it collects anything, it needs your consent.</string>
     <string name="consent_data_scope_title">Data collected</string>
-    <string name="consent_data_scope">When scanning is enabled, the app collects location, time, device and OS details, carrier/connectivity state, and 5G/LTE signal measurements where Android exposes them.</string>
+    <string name="consent_data_scope">When scanning is enabled, the app collects location, time and 5G/LTE signal measurements. Your device hardware and OS details are also collected. No further information about the user is collected.</string>
     <string name="consent_storage_title">Storage and reporting</string>
-    <string name="consent_local_only">Coverage samples are stored on this device first and reported according to your reporting setting.</string>
+    <string name="consent_local_only">Coverage samples are stored on this device and reported to our servers according to your reporting setting.</string>
     <string name="consent_control_title">Your control</string>
-    <string name="consent_reversible">After consent, scanning can run quietly in the background. You can stop scanning when you want to pause participation, save battery, or go off duty.</string>
+    <string name="consent_reversible">After consent, scanning can run quietly in the background. You can stop scanning whenever you want, for instance to save battery.</string>
     <string name="grant_consent">Grant consent</string>
     <string name="never">never</string>
     <string name="no_data">Scanner not running</string>
@@ -45,15 +45,15 @@
     <string name="setting_mock_telemetry_summary">Use synthesized data instead of actual radio and GNSS readings.</string>
     <string name="setting_mock_telemetry_emulator_summary">Mock telemetry is always used on emulators.</string>
     <string name="about_intro_title">About</string>
-    <string name="about_intro_body">5G-Scanner builds a real coverage data set from voluntary signal measurements collected while people carry their phones.</string>
+    <string name="about_intro_body">5G-Scanner builds a real coverage data set from voluntary signal measurements collected bu users of this app and other sensors.</string>
     <string name="about_data_title">Data collected</string>
     <string name="about_data_body">Location, time, device and OS details, carrier/connectivity state, and 5G/LTE signal measurements where Android exposes them.</string>
     <string name="about_privacy_title">Privacy</string>
-    <string name="about_privacy_body">Coverage data is used for mapping signal quality over time. It is not intended to identify you or be traced back to you.</string>
+    <string name="about_privacy_body">Coverage data is used for mapping signal quality over time. It can not be traced back to you, only the device make and os version that captured the data is reported.</string>
     <string name="about_storage_title">Storage and reporting</string>
     <string name="about_storage_body">Samples are stored on this device first and reported according to your reporting setting.</string>
     <string name="about_participation_title">Participation</string>
-    <string name="about_participation_body">You can stop scanning to pause participation, delete local coverage data, or uninstall the app to stop participating.</string>
+    <string name="about_participation_body">You can stop scanning to pause participation, delete local coverage data, or uninstall the app at any time.</string>
     <string name="about_app_title">App</string>
     <string name="about_app_body">%2$s\nVersion %1$s</string>
     <string name="setting_gnss_mode_title">Location mode</string>
@@ -78,8 +78,8 @@
     <string name="coverage_export_recent_action">Recent 1,000 samples</string>
     <string name="coverage_export_all_action">All local samples</string>
     <string name="delete_all_coverage_data_title">Delete all</string>
-    <string name="delete_all_coverage_data_summary">Delete every recorded coverage sample stored on this device.</string>
-    <string name="delete_all_coverage_data_confirm_message">Delete all recorded coverage samples from this device? This cannot be undone.</string>
+    <string name="delete_all_coverage_data_summary">Delete all coverage samples stored on this device.</string>
+    <string name="delete_all_coverage_data_confirm_message">Delete all coverage samples? This cannot be undone.</string>
     <string name="delete_all_coverage_data_confirm_action">Delete</string>
     <plurals name="coverage_data_summary">
         <item quantity="one">%1$d sample, %2$d day</item>
