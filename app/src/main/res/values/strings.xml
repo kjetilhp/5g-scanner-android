@@ -67,8 +67,11 @@
     <string name="log_files_empty_title">No recorded samples</string>
     <string name="log_files_empty_summary">Samples will appear here after scanning records coverage data.</string>
     <string name="coverage_data_inspector_title">Database inspector</string>
-    <string name="coverage_data_inspector_summary">Here be samples. This placeholder will become a database inspector for browsing, filtering, reporting state, and CSV export details.</string>
+    <string name="coverage_data_inspector_summary">Recent recorded samples from the local database.</string>
     <string name="coverage_data_inspector_stats">%1$d samples across %2$d days. Estimated stored size: %3$s.</string>
+    <string name="coverage_data_recent_title">Recent samples</string>
+    <string name="coverage_sample_detail_title">Sample details</string>
+    <string name="coverage_sample_detail_summary">Stored sample #%1$d</string>
     <string name="coverage_export_csv_title">Export CSV</string>
     <string name="coverage_export_csv_summary">Create a CSV file from recorded coverage samples.</string>
     <string name="coverage_export_recent_action">Recent 1,000 samples</string>

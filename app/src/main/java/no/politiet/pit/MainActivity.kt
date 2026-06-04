@@ -558,6 +558,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun createLogListView(): View {
         clearScannerViews()
         val stats = coverageLogStore.stats()
+        val recentSamples = if (stats.sampleCount > 0) {
+            coverageLogStore.recentInspectionSamples(INSPECTOR_SAMPLE_LIMIT)
+        } else {
+            emptyList()
+        }
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -588,6 +593,17 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 summary = getString(R.string.coverage_data_inspector_summary),
             ),
         ))
+        if (recentSamples.isNotEmpty()) {
+            content.addView(settingsSectionLabel(getString(R.string.coverage_data_recent_title)))
+            content.addView(settingsGroup(*recentSamples.map { sample ->
+                settingsActionRow(
+                    title = inspectionSampleTitle(sample),
+                    summary = inspectionSampleSummary(sample),
+                ) {
+                    showInspectionSampleDetails(sample)
+                }
+            }.toTypedArray()))
+        }
         if (stats.sampleCount > 0) {
             content.addView(settingsGroup(
                 settingsActionRow(
@@ -623,6 +639,53 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
             .show()
     }
+
+    private fun inspectionSampleTitle(sample: CoverageLogStore.InspectionSample): String =
+        buildString {
+            append(dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis)))
+            append(" - ")
+            append(sample.rat.ifBlank { sample.kind })
+            if (sample.mockTelemetry) append(" - MOCK")
+        }
+
+    private fun inspectionSampleSummary(sample: CoverageLogStore.InspectionSample): String {
+        val signal = listOfNotNull(
+            sample.rsrp.takeIf { it.isNotBlank() }?.let { "RSRP $it" },
+            sample.sinr.takeIf { it.isNotBlank() }?.let { "SINR $it" },
+        ).joinToString(", ").ifBlank { "Signal unavailable" }
+        val location = if (sample.lat.isNotBlank() && sample.lon.isNotBlank()) {
+            "${sample.lat}, ${sample.lon}"
+        } else {
+            "Location unavailable"
+        }
+        return "$signal\n$location\n${sample.uploadStatus}"
+    }
+
+    private fun showInspectionSampleDetails(sample: CoverageLogStore.InspectionSample) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.coverage_sample_detail_title))
+            .setMessage(inspectionSampleDetailText(sample))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun inspectionSampleDetailText(sample: CoverageLogStore.InspectionSample): String =
+        buildString {
+            appendLine(getString(R.string.coverage_sample_detail_summary, sample.id))
+            appendLine("Captured: ${dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis))}")
+            appendLine("Kind: ${sample.kind}")
+            appendLine("RAT: ${sample.rat.ifBlank { "unknown" }}")
+            appendLine("MCC/MNC: ${sample.mcc.ifBlank { "?" }}/${sample.mnc.ifBlank { "?" }}")
+            appendLine("Cell ID: ${sample.cellId.ifBlank { "unknown" }}")
+            appendLine("Band: ${sample.band.ifBlank { "unknown" }}")
+            appendLine("RSRP: ${sample.rsrp.ifBlank { "unknown" }}")
+            appendLine("SINR: ${sample.sinr.ifBlank { "unknown" }}")
+            appendLine("Location: ${if (sample.lat.isNotBlank() && sample.lon.isNotBlank()) "${sample.lat}, ${sample.lon}" else "unknown"}")
+            appendLine("Mock telemetry: ${if (sample.mockTelemetry) "yes" else "no"}")
+            appendLine("Upload status: ${sample.uploadStatus}")
+            appendLine()
+            appendLine(sample.sampleJson)
+        }
 
     private fun showExportCsvActions() {
         AlertDialog.Builder(this)
@@ -2685,6 +2748,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val TAG = "5GScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
         const val SCANNER_PERMISSION_REQUEST_CODE = 7001
+        const val INSPECTOR_SAMPLE_LIMIT = 25
         const val RECENT_EXPORT_SAMPLE_LIMIT = 1_000
         const val GNSS_AGE_TICK_MS = 1_000L
         const val QUALITY_ANIMATION_DURATION_MS = 420L

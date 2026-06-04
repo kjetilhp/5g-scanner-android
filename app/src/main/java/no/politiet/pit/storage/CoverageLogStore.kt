@@ -14,6 +14,24 @@ class CoverageLogStore(private val context: Context) {
         val estimatedBytes: Long,
     )
 
+    data class InspectionSample(
+        val id: Long,
+        val capturedAtEpochMillis: Long,
+        val kind: String,
+        val rat: String,
+        val mcc: String,
+        val mnc: String,
+        val cellId: String,
+        val band: String,
+        val rsrp: String,
+        val sinr: String,
+        val lat: String,
+        val lon: String,
+        val mockTelemetry: Boolean,
+        val uploadStatus: String,
+        val sampleJson: String,
+    )
+
     fun displayDirectory(): String = "local app database"
 
     fun stats(): LogStats = dbQuery {
@@ -48,6 +66,13 @@ class CoverageLogStore(private val context: Context) {
         )
     }
 
+    fun recentInspectionSamples(limit: Int): List<InspectionSample> = dbQuery {
+        CoverageDatabaseProvider.database(context)
+            .coverageSampleDao()
+            .recentSamples(limit)
+            .map { it.toInspectionSample() }
+    }
+
     fun exportUri(file: File): Uri =
         CoverageLogFileProvider.exportUriFor(context, file)
 
@@ -62,6 +87,34 @@ class CoverageLogStore(private val context: Context) {
 
     private fun <T> dbQuery(query: Callable<T>): T =
         CoverageDatabaseProvider.ioExecutor.submit(query).get()
+
+    private fun CoverageSampleEntity.toInspectionSample(): InspectionSample {
+        val json = runCatching { JSONObject(sampleJson) }.getOrNull()
+        val fix = json?.optJSONObject("fix")
+        val cell = when {
+            json?.has("cell") == true -> json.optJSONObject("cell")
+            json?.has("cells") == true -> json.optJSONArray("cells")?.optJSONObject(0)
+            else -> null
+        }
+        val signal = cell?.optJSONObject("signal")
+        return InspectionSample(
+            id = id,
+            capturedAtEpochMillis = capturedAtEpochMillis,
+            kind = json.optStringValue("kind").ifBlank { "sample" },
+            rat = cell.optStringValue("rat"),
+            mcc = cell.optStringValue("mcc"),
+            mnc = cell.optStringValue("mnc"),
+            cellId = cell.optStringValue("cellId"),
+            band = cell.optStringValue("band"),
+            rsrp = signal.optStringValue("rsrp"),
+            sinr = signal.optStringValue("sinr"),
+            lat = fix.optStringValue("lat"),
+            lon = fix.optStringValue("lon"),
+            mockTelemetry = mockTelemetry,
+            uploadStatus = uploadStatus,
+            sampleJson = sampleJson,
+        )
+    }
 
     private fun writeCsv(fileName: String, sampleJsonLines: List<String>): File {
         val csvFile = File(exportDirectory(), fileName)
