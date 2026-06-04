@@ -32,6 +32,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.InputType
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
@@ -47,6 +48,7 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -58,9 +60,11 @@ import android.widget.Toast
 import no.politiet.pit.domain.Cell
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
+import no.politiet.pit.reporting.ReportingEndpointVerifier
 import no.politiet.pit.reporting.ReportingScheduler
 import no.politiet.pit.storage.AppSettingsStore
 import no.politiet.pit.storage.CoverageDataStore
+import no.politiet.pit.storage.CoverageDatabaseProvider
 import no.politiet.pit.telemetry.MetricKind
 import no.politiet.pit.telemetry.MetricQuality
 import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
@@ -85,6 +89,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var sampleCount = 0
     private var gnssMode = AppConfig.Defaults.gnssMode
     private var reportingMode = AppConfig.Defaults.reportingMode
+    private var reportingEndpointUrl = AppConfig.Reporting.endpointUrl
     private var mockTelemetryEnabled = AppConfig.Defaults.mockTelemetryEnabled
     private var enhancedPrivacyEnabled = AppConfig.Defaults.enhancedPrivacyEnabled
     private var lastReportedAt: Instant? = null
@@ -1027,6 +1032,14 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         ))
         content.addView(settingsSectionLabel(getString(R.string.settings_section_developer)))
         content.addView(settingsGroup(
+            settingsPreferenceRow(
+                title = getString(R.string.setting_reporting_endpoint_title),
+                summary = getString(R.string.setting_reporting_endpoint_summary),
+                value = reportingEndpointDisplayValue(),
+                detail = reportingEndpointDetail(),
+            ) {
+                showReportingEndpointDialog()
+            },
             settingsToggleRow(
                 title = getString(R.string.setting_mock_telemetry_title),
                 summary = if (DeviceProfile.isLikelyEmulator()) {
@@ -1534,8 +1547,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         mockTelemetryEnabled = settings.mockTelemetryEnabled
         enhancedPrivacyEnabled = settings.enhancedPrivacyEnabled
         lastReportedAt = settings.lastReportedAt
+        reportingEndpointUrl = ReportingScheduler.endpointUrl(this)
         latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
-        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportedAt=$lastReportedAt")
+        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, reportingEndpointUrl=$reportingEndpointUrl, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportedAt=$lastReportedAt")
     }
 
     private fun saveState() {
@@ -1547,7 +1561,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             mockTelemetryEnabled = mockTelemetryEnabled,
             enhancedPrivacyEnabled = enhancedPrivacyEnabled,
         )
-        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled")
+        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, reportingEndpointUrl=$reportingEndpointUrl, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled")
     }
 
     private fun logAppliedSettingsOnLaunch() {
@@ -1555,7 +1569,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         Log.i(
             TAG,
-            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, reportingEndpointUrl=$reportingEndpointUrl, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
         )
     }
 
@@ -1857,9 +1871,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         title: String,
         summary: String,
         value: String,
+        detail: String? = null,
         onClick: () -> Unit,
     ): LinearLayout =
-        settingsRow(title, summary, value, isClickable = true).apply {
+        settingsRow(title, summary, value, isClickable = true, detail = detail).apply {
             setOnClickListener { onClick() }
         }
 
@@ -1931,6 +1946,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         value: String?,
         isClickable: Boolean,
         titleColor: Int = SETTINGS_TEXT,
+        detail: String? = null,
     ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1958,6 +1974,23 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 setTextColor(SETTINGS_SUBTLE_TEXT)
                 setPadding(0, dp(4), 0, 0)
             })
+            if (!detail.isNullOrBlank()) {
+                textColumn.addView(View(this@MainActivity).apply {
+                    setBackgroundColor(SETTINGS_DIVIDER)
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(1),
+                ).apply {
+                    topMargin = dp(10)
+                    bottomMargin = dp(8)
+                })
+                textColumn.addView(TextView(this@MainActivity).apply {
+                    text = detail
+                    textSize = 13f
+                    setTextColor(SETTINGS_SUBTLE_TEXT)
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                })
+            }
             addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
             if (value != null) {
@@ -2073,6 +2106,107 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun reportingEndpointDisplayValue(): String =
+        if (reportingEndpointUrl == AppConfig.Reporting.endpointUrl) {
+            getString(R.string.setting_reporting_endpoint_default_value)
+        } else {
+            getString(R.string.setting_reporting_endpoint_custom_value)
+        }
+
+    private fun reportingEndpointDetail(): String? =
+        if (reportingEndpointUrl == AppConfig.Reporting.endpointUrl) {
+            null
+        } else {
+            reportingEndpointUrl
+        }
+
+    private fun showReportingEndpointDialog() {
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(reportingEndpointUrl)
+            setSelection(text.length)
+            hint = AppConfig.Reporting.endpointUrl
+        }
+        val statusText = TextView(this).apply {
+            setTextColor(SETTINGS_SUBTLE_TEXT)
+            textSize = 14f
+            visibility = View.GONE
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), 0)
+            addView(input)
+            addView(statusText, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(10)
+            })
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.setting_reporting_endpoint_title))
+            .setMessage(getString(R.string.setting_reporting_endpoint_dialog_message))
+            .setView(content)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(getString(R.string.setting_reporting_endpoint_reset_action)) { _, _ ->
+                ReportingScheduler.saveEndpointUrl(this, "")
+                reportingEndpointUrl = ReportingScheduler.endpointUrl(this)
+                Log.d(TAG, "Reporting endpoint reset: endpoint=$reportingEndpointUrl")
+                render()
+            }
+            .setPositiveButton(getString(R.string.setting_reporting_endpoint_save_action), null)
+            .show()
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            val endpoint = input.text.toString().trim()
+            if (endpoint.isBlank()) {
+                ReportingScheduler.saveEndpointUrl(this, "")
+                reportingEndpointUrl = ReportingScheduler.endpointUrl(this)
+                Log.d(TAG, "Reporting endpoint reset: endpoint=$reportingEndpointUrl")
+                dialog.dismiss()
+                render()
+                return@setOnClickListener
+            }
+
+            statusText.apply {
+                setTextColor(SETTINGS_SUBTLE_TEXT)
+                text = getString(R.string.setting_reporting_endpoint_verifying)
+                visibility = View.VISIBLE
+            }
+            input.isEnabled = false
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.isEnabled = false
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.isEnabled = false
+
+            CoverageDatabaseProvider.ioExecutor.execute {
+                val result = ReportingEndpointVerifier.verify(endpoint)
+                runOnUiThread {
+                    input.isEnabled = true
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.isEnabled = true
+                    dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.isEnabled = true
+
+                    when (result) {
+                        ReportingEndpointVerifier.VerificationResult.Success -> {
+                            ReportingScheduler.saveEndpointUrl(this, endpoint)
+                            reportingEndpointUrl = ReportingScheduler.endpointUrl(this)
+                            Log.d(TAG, "Reporting endpoint changed: endpoint=$reportingEndpointUrl")
+                            dialog.dismiss()
+                            render()
+                        }
+                        is ReportingEndpointVerifier.VerificationResult.Failure -> {
+                            statusText.setTextColor(SETTINGS_DESTRUCTIVE)
+                            statusText.text = result.reason
+                            statusText.visibility = View.VISIBLE
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun sendNow() {

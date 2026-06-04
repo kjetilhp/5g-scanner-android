@@ -25,6 +25,7 @@ object ReportingScheduler {
     const val KEY_CONSENT_GRANTED = "consentGranted"
     const val KEY_REPORTING_MODE = "reportingMode"
     const val KEY_LAST_REPORTED_AT = "lastReportedAt"
+    const val KEY_REPORTING_ENDPOINT_URL = "reportingEndpointUrl"
 
     private const val TAG = "5GScanner"
     private const val ACTION_REPORTING_TRIGGER = "no.politiet.pit.REPORTING_TRIGGER"
@@ -146,6 +147,23 @@ object ReportingScheduler {
 
     fun lastReportedAt(context: Context): Instant? =
         appPreferences(context).getString(KEY_LAST_REPORTED_AT, null)?.let(Instant::parse)
+
+    fun endpointUrl(context: Context): String =
+        appPreferences(context)
+            .getString(KEY_REPORTING_ENDPOINT_URL, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: AppConfig.Reporting.endpointUrl
+
+    fun saveEndpointUrl(context: Context, endpointUrl: String) {
+        val normalized = endpointUrl.trim()
+        val editor = appPreferences(context).edit()
+        if (normalized.isBlank() || normalized == AppConfig.Reporting.endpointUrl) {
+            editor.remove(KEY_REPORTING_ENDPOINT_URL)
+        } else {
+            editor.putString(KEY_REPORTING_ENDPOINT_URL, normalized)
+        }
+        editor.apply()
+    }
 
     fun status(context: Context): ReportingStatus =
         CoverageDatabaseProvider.ioExecutor.submit(Callable {
@@ -317,7 +335,7 @@ object ReportingScheduler {
             payloadBytes = jsonl.toByteArray(Charsets.UTF_8).size.toLong(),
             jsonl = jsonl,
         )
-        val transport = reportingTransport()
+        val transport = reportingTransport(context)
         when (val transportResult = transport.post(payload)) {
             ReportingTransportResult.Success -> {
                 val uploadedAt = Instant.now()
@@ -421,13 +439,14 @@ object ReportingScheduler {
             (nextAttemptNumber.coerceAtLeast(1) - 1).coerceAtMost(AppConfig.Reporting.retryBackoff.lastIndex)
         ].toMillis()
 
-    private fun reportingTransport(): ReportingTransport =
+    private fun reportingTransport(context: Context): ReportingTransport =
         if (AppConfig.Reporting.useMockTransport) {
             Log.i(TAG, "Reporting transport: mock")
             MockReportingTransport()
         } else {
-            Log.i(TAG, "Reporting transport: http endpoint=${AppConfig.Reporting.endpointUrl}")
-            HttpReportingTransport()
+            val endpointUrl = endpointUrl(context)
+            Log.i(TAG, "Reporting transport: http endpoint=$endpointUrl")
+            HttpReportingTransport(endpointUrl = endpointUrl)
         }
 
     private fun reportingPendingIntent(context: Context): PendingIntent =

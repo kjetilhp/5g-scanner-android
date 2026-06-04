@@ -130,4 +130,4 @@ App icons are based on `assets/icon/source.svg`. Android launcher icons use adap
 
 Do not commit large generated datasets unless they are intentionally curated fixtures.
 
-Runtime defaults and tuning values that are natural to adjust during development belong in `app/src/main/java/no/politiet/pit/AppConfig.kt` rather than being redefined across Activity, service, storage, reporting, or telemetry classes. Reporting endpoint and transport-mode switches belong there too.
+Runtime defaults and tuning values that are natural to adjust during development belong in `app/src/main/java/no/politiet/pit/AppConfig.kt` rather than being redefined across Activity, service, storage, reporting, or telemetry classes. Reporting endpoint and transport-mode defaults belong there too. Temporary field-test endpoint overrides can be set from About -> Developer -> Reporting endpoint; the override is saved only after URL validation and an `OPTIONS` response that advertises `POST` support.

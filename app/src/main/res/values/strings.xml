@@ -45,6 +45,14 @@
     <string name="setting_mock_telemetry_title">Mock telemetry</string>
     <string name="setting_mock_telemetry_summary">Use synthesized data instead of actual radio and GNSS readings.</string>
     <string name="setting_mock_telemetry_emulator_summary">Mock telemetry is always used on emulators.</string>
+    <string name="setting_reporting_endpoint_title">Reporting endpoint</string>
+    <string name="setting_reporting_endpoint_summary">Developer override for where queued coverage samples are sent.</string>
+    <string name="setting_reporting_endpoint_default_value">Default</string>
+    <string name="setting_reporting_endpoint_custom_value">Custom</string>
+    <string name="setting_reporting_endpoint_dialog_message">Leave blank to use the default endpoint from app config.</string>
+    <string name="setting_reporting_endpoint_save_action">Save</string>
+    <string name="setting_reporting_endpoint_reset_action">Reset</string>
+    <string name="setting_reporting_endpoint_verifying">Verifying endpoint...</string>
     <string name="setting_enhanced_privacy_title">Enhanced privacy</string>
     <string name="setting_enhanced_privacy_summary">Store new coverage samples with time set to UTC midnight and less precise location details.</string>
     <string name="enhanced_privacy_active">Enhanced privacy</string>
@@ -59,7 +67,7 @@
     <string name="about_participation_title">Participation</string>
     <string name="about_participation_body">You can stop scanning to pause participation, delete local coverage data, or uninstall the app at any time.</string>
     <string name="about_app_title">App</string>
-    <string name="about_app_body">%2$s\nVersion %1$s</string>
+    <string name="about_app_body">%2$s v%1$s</string>
     <string name="setting_gnss_mode_title">Location mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
     <string name="reporting_last_sent_line">Last sent %1$s</string>
