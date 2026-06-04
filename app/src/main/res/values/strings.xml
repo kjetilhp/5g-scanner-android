@@ -46,7 +46,7 @@
     <string name="setting_mock_telemetry_summary">Use synthesized data instead of actual radio and GNSS readings.</string>
     <string name="setting_mock_telemetry_emulator_summary">Mock telemetry is always used on emulators.</string>
     <string name="setting_enhanced_privacy_title">Enhanced privacy</string>
-    <string name="setting_enhanced_privacy_summary">Store new coverage samples with time set to UTC midnight and report a less accurate location.</string>
+    <string name="setting_enhanced_privacy_summary">Store new coverage samples with time set to UTC midnight and less precise location details.</string>
     <string name="enhanced_privacy_active">Enhanced privacy</string>
     <string name="about_intro_title">About</string>
     <string name="about_intro_body">5G-Scanner builds a real coverage data set from voluntary signal measurements collected bu users of this app and other sensors.</string>

@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.round
 
 object CoverageSampleEnhancedPrivacyTransformer {
     fun reduce(sample: CoverageSample): CoverageSample {
@@ -24,8 +25,16 @@ object CoverageSampleEnhancedPrivacyTransformer {
             gpsTime = gpsTime?.snappedToUtcMidnight(),
             lat = gridCenter.lat,
             lon = gridCenter.lon,
+            altitude = altitude.roundedTo(AppConfig.EnhancedPrivacy.altitudeResolutionMeters),
+            speed = null,
+            heading = null,
+            hdop = hdop.coerceAtLeast(AppConfig.EnhancedPrivacy.reportedHdop),
+            satellites = AppConfig.EnhancedPrivacy.reportedSatellites,
         )
     }
+
+    private fun Double.roundedTo(resolution: Double): Double =
+        round(this / resolution) * resolution
 
     private fun Instant.snappedToUtcMidnight(): Instant =
         atZone(ZoneOffset.UTC)

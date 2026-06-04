@@ -31,6 +31,9 @@ object AppConfig {
 
     object EnhancedPrivacy {
         const val gridCellSizeMeters: Double = 50.0
+        const val altitudeResolutionMeters: Double = 50.0
+        const val reportedHdop: Double = 10.0
+        const val reportedSatellites: Int = 0
     }
 
     object Reporting {
