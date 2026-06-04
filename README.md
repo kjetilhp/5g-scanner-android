@@ -96,6 +96,13 @@ The emulator build currently uses mock telemetry. It supports:
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
+Useful verification commands:
+
+```text
+.\gradlew.bat assembleDebug
+.\gradlew.bat testDebugUnitTest
+```
+
 ## Icon Workflow
 
 The app icon and favicon files are based on a single square SVG source:

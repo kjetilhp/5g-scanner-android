@@ -222,45 +222,16 @@ object ReportingScheduler {
         reportingMode: String,
         triggerReason: TriggerReason,
     ): ReportingResult {
-        var sentSamples = 0
-        var sentBytes = 0L
-        var lastBatchId: String? = null
-
-        while (true) {
-            val result = runReportingTriggerOnce(context, reportingMode, triggerReason)
-            when (result.outcome) {
-                Outcome.Sent -> {
-                    sentSamples += result.sampleCount
-                    sentBytes += result.payloadBytes
-                    lastBatchId = result.batchId
-                }
-                Outcome.NoSamples -> {
-                    return if (sentSamples > 0) {
-                        Log.i(
-                            TAG,
-                            "Reporting trigger complete: mode=$reportingMode, result=sent_all, samples=$sentSamples, payloadBytes=$sentBytes",
-                        )
-                        ReportingResult(
-                            outcome = Outcome.Sent,
-                            sampleCount = sentSamples,
-                            payloadBytes = sentBytes,
-                            batchId = lastBatchId,
-                        )
-                    } else {
-                        result
-                    }
-                }
-                Outcome.Failed -> {
-                    if (sentSamples > 0) {
-                        Log.i(
-                            TAG,
-                            "Reporting trigger stopped after partial send: mode=$reportingMode, sentSamples=$sentSamples, sentBytes=$sentBytes, error=${result.error}",
-                        )
-                    }
-                    return result
-                }
-            }
+        val result = ReportingDrain.drain {
+            runReportingTriggerOnce(context, reportingMode, triggerReason)
         }
+        if (result.outcome == Outcome.Sent) {
+            Log.i(
+                TAG,
+                "Reporting trigger complete: mode=$reportingMode, result=sent_all, samples=${result.sampleCount}, payloadBytes=${result.payloadBytes}",
+            )
+        }
+        return result
     }
 
     private fun runReportingTriggerOnce(

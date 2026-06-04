@@ -113,6 +113,8 @@ Prefer small, explicit models and tests around the output contract.
 
 Before making a commit, update `AGENTS.md` and `README.md` when the change affects project structure, setup steps, architecture direction, development workflow, or user-facing project status.
 
+Use `.\gradlew.bat assembleDebug` for the normal Android build verification and `.\gradlew.bat testDebugUnitTest` for local JVM unit tests.
+
 When adding Android code, keep modules separated roughly as:
 
 - `assets/icon/` for the canonical app icon SVG and generated favicon assets
