@@ -54,6 +54,7 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import no.politiet.pit.domain.Cell
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
@@ -108,6 +109,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var settingsRefreshScheduled = false
     private var reportingCountdownRefreshScheduled = false
     private var pendingAnimatedSampleId: Long? = null
+    private var pendingCoverageDataScrollY: Int? = null
     private var scannerStateReceiverRegistered = false
     private lateinit var coverageDataStore: CoverageDataStore
     private lateinit var settingsStore: AppSettingsStore
@@ -194,6 +196,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     if (showingSettings && settingsDestination == SettingsDestination.CoverageData) {
                         pendingAnimatedSampleId = intent.getLongExtra(ScannerService.EXTRA_SAMPLE_ID, 0L)
                             .takeIf { it > 0L }
+                        pendingCoverageDataScrollY = activeCoverageDataScrollY()
                         render()
                     } else {
                         scheduleSettingsRefresh()
@@ -616,9 +619,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_coverage_data)))
         content.addView(coverageDataStatsGroup(stats))
+        val actionRows = mutableListOf<View>()
         if (stats.sampleCount > 0) {
-            content.addView(settingsSectionLabel(getString(R.string.coverage_data_actions_title)))
-            content.addView(settingsGroup(
+            actionRows.add(
                 settingsActionRow(
                     title = getString(R.string.coverage_export_csv_title),
                     summary = getString(R.string.coverage_export_csv_summary),
@@ -626,13 +629,65 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ) {
                     showExportCsvActions()
                 },
+            )
+        }
+        if (stats.sampleCount > 0) {
+            actionRows.add(
+                if (stats.reportedSampleCount > 0) settingsDestructiveActionRow(
+                    title = getString(R.string.delete_reported_coverage_data_title),
+                    summary = getString(
+                        R.string.delete_reported_coverage_data_summary,
+                        resources.getQuantityString(
+                            R.plurals.coverage_data_sample_count_short,
+                            stats.reportedSampleCount,
+                            stats.reportedSampleCount,
+                        ),
+                    ),
+                ) {
+                    confirmDeleteReportedSamples(stats.reportedSampleCount)
+                } else settingsActionRow(
+                    title = getString(R.string.delete_reported_coverage_data_title),
+                    summary = getString(R.string.delete_reported_coverage_data_empty_summary),
+                ) {
+                    Toast.makeText(
+                        this,
+                        getString(R.string.delete_reported_coverage_data_empty_message),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
+        }
+        if (stats.exportCacheFileCount > 0) {
+            actionRows.add(
+                settingsDestructiveActionRow(
+                    title = getString(R.string.delete_export_cache_title),
+                    summary = getString(
+                        R.string.delete_export_cache_summary,
+                        resources.getQuantityString(
+                            R.plurals.coverage_data_export_file_count,
+                            stats.exportCacheFileCount,
+                            stats.exportCacheFileCount,
+                        ),
+                        formatBytes(stats.exportCacheBytes),
+                    ),
+                ) {
+                    confirmDeleteExportCache(stats.exportCacheFileCount, stats.exportCacheBytes)
+                },
+            )
+        }
+        if (stats.sampleCount > 0) {
+            actionRows.add(
                 settingsDestructiveActionRow(
                     title = getString(R.string.delete_all_coverage_data_title),
                     summary = getString(R.string.delete_all_coverage_data_summary),
                 ) {
-                    confirmDeleteAllSamples()
+                    confirmDeleteAllSamples(stats.sampleCount, stats.exportCacheFileCount, stats.exportCacheBytes)
                 },
-            ))
+            )
+        }
+        if (actionRows.isNotEmpty()) {
+            content.addView(settingsSectionLabel(getString(R.string.coverage_data_actions_title)))
+            content.addView(settingsGroup(*actionRows.toTypedArray()))
         }
         if (recentSamples.isNotEmpty()) {
             content.addView(settingsSectionLabel(getString(R.string.coverage_data_recent_title)))
@@ -650,13 +705,25 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 render(ScreenTransition.Back)
             },
             body = content,
+            scrollTag = COVERAGE_DATA_SCROLL_TAG,
+            initialScrollY = pendingCoverageDataScrollY,
         )
     }
 
-    private fun confirmDeleteAllSamples() {
+    private fun confirmDeleteAllSamples(sampleCount: Int, exportCacheFileCount: Int, exportCacheBytes: Long) {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.delete_all_coverage_data_title))
-            .setMessage(getString(R.string.delete_all_coverage_data_confirm_message))
+            .setMessage(
+                getString(
+                    R.string.delete_all_coverage_data_confirm_message,
+                    resources.getQuantityString(
+                        R.plurals.coverage_data_sample_count,
+                        sampleCount,
+                        sampleCount,
+                    ),
+                    exportCacheSummary(exportCacheFileCount, exportCacheBytes),
+                ),
+            )
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(getString(R.string.delete_all_coverage_data_confirm_action)) { _, _ ->
                 val deletedSamples = coverageDataStore.deleteAllSamples()
@@ -665,6 +732,57 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             }
             .show()
     }
+
+    private fun confirmDeleteReportedSamples(sampleCount: Int) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.delete_reported_coverage_data_title))
+            .setMessage(
+                getString(
+                    R.string.delete_reported_coverage_data_confirm_message,
+                    resources.getQuantityString(
+                        R.plurals.coverage_data_sample_count,
+                        sampleCount,
+                        sampleCount,
+                    ),
+                ),
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(getString(R.string.delete_reported_coverage_data_confirm_action)) { _, _ ->
+                val deletedSamples = coverageDataStore.deleteReportedSamples()
+                Log.d(TAG, "Deleted reported coverage samples: samples=$deletedSamples")
+                render()
+            }
+            .show()
+    }
+
+    private fun confirmDeleteExportCache(fileCount: Int, bytes: Long) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.delete_export_cache_title))
+            .setMessage(
+                getString(
+                    R.string.delete_export_cache_confirm_message,
+                    exportCacheSummary(fileCount, bytes),
+                ),
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(getString(R.string.delete_export_cache_confirm_action)) { _, _ ->
+                val deletedFiles = coverageDataStore.deleteExportCache()
+                Log.d(TAG, "Deleted exported CSV cache: files=$deletedFiles")
+                render()
+            }
+            .show()
+    }
+
+    private fun exportCacheSummary(fileCount: Int, bytes: Long): String =
+        getString(
+            R.string.coverage_data_export_cache_summary,
+            resources.getQuantityString(
+                R.plurals.coverage_data_export_file_count,
+                fileCount,
+                fileCount,
+            ),
+            formatBytes(bytes),
+        )
 
     private fun coverageDataStatsGroup(stats: CoverageDataStore.RecordedDataStats): LinearLayout {
         val queuedSampleCount = ReportingScheduler.status(this).queuedSampleCount
@@ -818,8 +936,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             appendLine("Mock telemetry: ${if (sample.mockTelemetry) "yes" else "no"}")
             appendLine("Enhanced privacy applied: ${if (sample.privacyReduced) "yes" else "no"}")
             appendLine("Upload status: ${sample.uploadStatus}")
-            appendLine()
-            appendLine(sample.sampleJson)
         }
 
     private fun showExportCsvActions() {
@@ -1630,6 +1746,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         backDescription: String,
         onBack: () -> Unit,
         body: View,
+        scrollTag: String? = null,
+        initialScrollY: Int? = null,
     ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1637,13 +1755,25 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             addView(settingsToolbar(title, backDescription, onBack))
             addView(ScrollView(this@MainActivity).apply {
                 setBackgroundColor(SETTINGS_BACKGROUND)
+                tag = scrollTag
                 addView(body)
+                initialScrollY?.let { scrollY ->
+                    post {
+                        scrollTo(0, scrollY)
+                        if (scrollTag == COVERAGE_DATA_SCROLL_TAG) {
+                            pendingCoverageDataScrollY = null
+                        }
+                    }
+                }
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f,
             ))
         }
+
+    private fun activeCoverageDataScrollY(): Int? =
+        window.decorView.findViewWithTag<ScrollView>(COVERAGE_DATA_SCROLL_TAG)?.scrollY
 
     private fun settingsToolbar(
         title: String = getString(R.string.settings_title),
@@ -3063,6 +3193,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val SCANNER_PERMISSION_REQUEST_CODE = 7001
         const val GNSS_AGE_TICK_MS = 1_000L
         const val REPORTING_COUNTDOWN_REFRESH_MS = 60_000L
+        const val COVERAGE_DATA_SCROLL_TAG = "coverage-data-scroll"
         const val QUALITY_ANIMATION_DURATION_MS = 420L
         const val QUALITY_ANIMATION_FRAME_MS = 16L
         val SCANNER_BACKGROUND: Int = Color.rgb(0, 38, 62)

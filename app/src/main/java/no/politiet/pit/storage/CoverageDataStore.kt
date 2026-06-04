@@ -13,6 +13,9 @@ class CoverageDataStore(private val context: Context) {
         val sampleCount: Int,
         val dayCount: Int,
         val estimatedBytes: Long,
+        val reportedSampleCount: Int,
+        val exportCacheFileCount: Int,
+        val exportCacheBytes: Long,
     )
 
     data class InspectionSample(
@@ -43,6 +46,9 @@ class CoverageDataStore(private val context: Context) {
             sampleCount = dao.count(),
             dayCount = dao.dayCount(),
             estimatedBytes = dao.encodedSizeBytes(),
+            reportedSampleCount = dao.reportedCount(),
+            exportCacheFileCount = exportCacheFiles().size,
+            exportCacheBytes = exportCacheFiles().sumOf { it.length() },
         )
     }
 
@@ -82,13 +88,36 @@ class CoverageDataStore(private val context: Context) {
     fun deleteAllSamples(): Int = dbQuery {
         val database = CoverageDatabaseProvider.database(context)
         database.reportingBatchDao().deleteAll()
-        database.coverageSampleDao().deleteAll()
+        val deletedSamples = database.coverageSampleDao().deleteAll()
+        clearExportCache()
+        deletedSamples
+    }
+
+    fun deleteReportedSamples(): Int = dbQuery {
+        val database = CoverageDatabaseProvider.database(context)
+        database.reportingBatchDao().deleteByStatus(ReportingBatchEntity.StatusUploaded)
+        database.coverageSampleDao().deleteReported()
+    }
+
+    fun deleteExportCache(): Int =
+        clearExportCache()
+
+    private fun clearExportCache(): Int {
+        val files = exportCacheFiles()
+        files.forEach { it.delete() }
+        return files.size
     }
 
     private fun exportDirectory(): File =
         File(context.cacheDir, "coverage-exports").apply {
             mkdirs()
         }
+
+    private fun exportCacheFiles(): List<File> =
+        File(context.cacheDir, "coverage-exports")
+            .listFiles { file -> file.isFile }
+            ?.toList()
+            .orEmpty()
 
     private fun <T> dbQuery(query: Callable<T>): T =
         CoverageDatabaseProvider.ioExecutor.submit(query).get()

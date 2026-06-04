@@ -142,6 +142,22 @@ interface CoverageSampleDao {
     )
     fun queuedUploadCount(uploadedStatus: String = CoverageSampleEntity.UploadStatusUploaded): Int
 
+    @Query(
+        """
+        SELECT COUNT(*) FROM coverage_samples
+        WHERE upload_status = :uploadedStatus
+        """,
+    )
+    fun reportedCount(uploadedStatus: String = CoverageSampleEntity.UploadStatusUploaded): Int
+
+    @Query(
+        """
+        DELETE FROM coverage_samples
+        WHERE upload_status = :uploadedStatus
+        """,
+    )
+    fun deleteReported(uploadedStatus: String = CoverageSampleEntity.UploadStatusUploaded): Int
+
     @Query("DELETE FROM coverage_samples")
     fun deleteAll(): Int
 }

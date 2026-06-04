@@ -63,7 +63,7 @@
     <string name="setting_gnss_mode_title">Location mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
     <string name="reporting_last_sent_line">Last sent %1$s</string>
-    <string name="reporting_next_upload_line">Next upload in %1$s</string>
+    <string name="reporting_next_upload_line">Next upload in about %1$s</string>
     <string name="reporting_countdown_hours_minutes">%1$s %2$s</string>
     <string name="reporting_last_failure_line">Last failure: %1$s</string>
     <string name="setting_send_now_title">Send now</string>
@@ -84,9 +84,20 @@
     <string name="coverage_export_csv_summary">Create a CSV file from recorded coverage samples.</string>
     <string name="coverage_export_recent_action">Recent 1,000 samples</string>
     <string name="coverage_export_all_action">All local samples</string>
+    <string name="delete_reported_coverage_data_title">Delete reported samples</string>
+    <string name="delete_reported_coverage_data_summary">Delete %1$s already reported from this device.</string>
+    <string name="delete_reported_coverage_data_empty_summary">No reported samples to delete.</string>
+    <string name="delete_reported_coverage_data_empty_message">There are no reported samples to delete.</string>
+    <string name="delete_reported_coverage_data_confirm_message">Delete %1$s that have already been reported? Queued samples are kept. This cannot be undone.</string>
+    <string name="delete_reported_coverage_data_confirm_action">Delete reported</string>
+    <string name="delete_export_cache_title">Delete exported CSV files</string>
+    <string name="delete_export_cache_summary">Delete %1$s (%2$s) created for sharing.</string>
+    <string name="delete_export_cache_confirm_message">Delete exported CSV files from this device cache?\n\n%1$s</string>
+    <string name="delete_export_cache_confirm_action">Delete files</string>
+    <string name="coverage_data_export_cache_summary">%1$s (%2$s)</string>
     <string name="delete_all_coverage_data_title">Delete all</string>
     <string name="delete_all_coverage_data_summary">Delete all coverage samples stored on this device.</string>
-    <string name="delete_all_coverage_data_confirm_message">Delete all coverage samples? This cannot be undone.</string>
+    <string name="delete_all_coverage_data_confirm_message">Delete all recorded coverage data from this device?\n\n%1$s\nExported CSV cache: %2$s\n\nThis cannot be undone.</string>
     <string name="delete_all_coverage_data_confirm_action">Delete</string>
     <plurals name="coverage_data_sample_count">
         <item quantity="one">%1$d coverage sample</item>
@@ -99,6 +110,10 @@
     <plurals name="coverage_data_queued_count">
         <item quantity="one">%1$d queued</item>
         <item quantity="other">%1$d queued</item>
+    </plurals>
+    <plurals name="coverage_data_export_file_count">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
     </plurals>
     <plurals name="reporting_countdown_hours">
         <item quantity="one">%1$d hour</item>

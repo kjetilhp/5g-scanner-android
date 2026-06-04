@@ -82,4 +82,12 @@ interface ReportingBatchDao {
 
     @Query("DELETE FROM reporting_batches")
     fun deleteAll(): Int
+
+    @Query(
+        """
+        DELETE FROM reporting_batches
+        WHERE status = :status
+        """,
+    )
+    fun deleteByStatus(status: String): Int
 }
