@@ -17,5 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Ask"
+rootProject.name = "5G Scanner"
 include(":app")
