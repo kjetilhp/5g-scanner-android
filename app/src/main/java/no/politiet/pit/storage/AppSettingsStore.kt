@@ -1,6 +1,7 @@
 package no.politiet.pit.storage
 
 import android.content.Context
+import no.politiet.pit.AppConfig
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
 import no.politiet.pit.reporting.ReportingScheduler
@@ -24,15 +25,15 @@ class AppSettingsStore(private val context: Context) {
                 ReportingScheduler.KEY_CONSENT_GRANTED,
                 legacyConsentGranted,
             ),
-            scannerStopped = preferences.getBoolean(KEY_SCANNER_STOPPED, false),
+            scannerStopped = preferences.getBoolean(KEY_SCANNER_STOPPED, AppConfig.Defaults.scannerStopped),
             gnssMode = GnssMode.fromName(
-                preferences.getString(KEY_GNSS_MODE, GnssMode.Balanced.name),
+                preferences.getString(KEY_GNSS_MODE, AppConfig.Defaults.gnssMode.name),
             ),
             reportingMode = ReportingMode.fromName(
-                preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, ReportingMode.Hourly.name),
+                preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, AppConfig.Defaults.reportingMode.name),
             ),
-            mockTelemetryEnabled = preferences.getBoolean(KEY_MOCK_TELEMETRY_ENABLED, true),
-            enhancedPrivacyEnabled = preferences.getBoolean(KEY_ENHANCED_PRIVACY_ENABLED, false),
+            mockTelemetryEnabled = preferences.getBoolean(KEY_MOCK_TELEMETRY_ENABLED, AppConfig.Defaults.mockTelemetryEnabled),
+            enhancedPrivacyEnabled = preferences.getBoolean(KEY_ENHANCED_PRIVACY_ENABLED, AppConfig.Defaults.enhancedPrivacyEnabled),
             lastReportedAt = ReportingScheduler.lastReportedAt(context),
         )
     }

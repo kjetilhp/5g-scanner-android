@@ -63,6 +63,7 @@ import no.politiet.pit.storage.CoverageDataStore
 import no.politiet.pit.telemetry.MetricKind
 import no.politiet.pit.telemetry.MetricQuality
 import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -81,10 +82,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var showingSettings = false
     private var settingsDestination = SettingsDestination.Main
     private var sampleCount = 0
-    private var gnssMode = GnssMode.Balanced
-    private var reportingMode = ReportingMode.Hourly
-    private var mockTelemetryEnabled = true
-    private var enhancedPrivacyEnabled = false
+    private var gnssMode = AppConfig.Defaults.gnssMode
+    private var reportingMode = AppConfig.Defaults.reportingMode
+    private var mockTelemetryEnabled = AppConfig.Defaults.mockTelemetryEnabled
+    private var enhancedPrivacyEnabled = AppConfig.Defaults.enhancedPrivacyEnabled
     private var lastReportedAt: Instant? = null
     private val mobileOperatorLookup: MobileOperatorLookup by lazy {
         MobileOperatorLookup.fromRawResource(this, R.raw.mobile_operators)
@@ -105,6 +106,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
     private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
+    private var reportingCountdownRefreshScheduled = false
     private var pendingAnimatedSampleId: Long? = null
     private var scannerStateReceiverRegistered = false
     private lateinit var coverageDataStore: CoverageDataStore
@@ -165,6 +167,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         override fun run() {
             settingsRefreshScheduled = false
             if (showingSettings) {
+                render()
+            }
+        }
+    }
+
+    private val reportingCountdownRefresh = object : Runnable {
+        override fun run() {
+            reportingCountdownRefreshScheduled = false
+            if (showingSettings && settingsDestination == SettingsDestination.Main) {
                 render()
             }
         }
@@ -235,10 +246,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         handler.removeCallbacks(startButtonPulse)
         handler.removeCallbacks(errorPulse)
         handler.removeCallbacks(settingsRefresh)
+        handler.removeCallbacks(reportingCountdownRefresh)
         gnssAgeTickScheduled = false
         startButtonPulseScheduled = false
         errorPulseScheduled = false
         settingsRefreshScheduled = false
+        reportingCountdownRefreshScheduled = false
         startButtonPulseAnimator?.cancel()
         scannerActivityRingAnimator?.cancel()
         super.onDestroy()
@@ -582,6 +595,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         updateScannerUi()
+        scheduleReportingCountdownRefresh()
 
         return root
     }
@@ -590,7 +604,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         clearScannerViews()
         val stats = coverageDataStore.stats()
         val recentSamples = if (stats.sampleCount > 0) {
-            coverageDataStore.recentInspectionSamples(INSPECTOR_SAMPLE_LIMIT)
+            coverageDataStore.recentInspectionSamples(AppConfig.RecordedCoverageData.recentSampleInspectionLimit)
         } else {
             emptyList()
         }
@@ -653,6 +667,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun coverageDataStatsGroup(stats: CoverageDataStore.RecordedDataStats): LinearLayout {
+        val queuedSampleCount = ReportingScheduler.status(this).queuedSampleCount
         return settingsGroup(
             settingsInfoRow(
                 title = getString(R.string.coverage_data_summary_title),
@@ -663,6 +678,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                         R.plurals.coverage_data_sample_count,
                         stats.sampleCount,
                         stats.sampleCount,
+                    ),
+                    resources.getQuantityString(
+                        R.plurals.coverage_data_queued_count,
+                        queuedSampleCount,
+                        queuedSampleCount,
                     ),
                 ),
             ),
@@ -812,7 +832,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ),
             ) { _, which ->
                 when (which) {
-                    0 -> shareCoverageCsv(coverageDataStore.exportRecentCsv(RECENT_EXPORT_SAMPLE_LIMIT))
+                    0 -> shareCoverageCsv(coverageDataStore.exportRecentCsv(AppConfig.RecordedCoverageData.recentCsvExportLimit))
                     1 -> shareCoverageCsv(coverageDataStore.exportAllCsv())
                 }
             }
@@ -989,19 +1009,35 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         handler.post(settingsRefresh)
     }
 
+    private fun scheduleReportingCountdownRefresh() {
+        if (
+            !showingSettings ||
+            settingsDestination != SettingsDestination.Main ||
+            reportingCountdownRefreshScheduled ||
+            !reportingMode.isScheduledMode()
+        ) {
+            return
+        }
+        reportingCountdownRefreshScheduled = true
+        val delayMs = (REPORTING_COUNTDOWN_REFRESH_MS - (System.currentTimeMillis() % REPORTING_COUNTDOWN_REFRESH_MS))
+            .coerceAtLeast(1_000L)
+        handler.postDelayed(reportingCountdownRefresh, delayMs)
+    }
+
     private fun ensureReportingScheduler() {
         Log.d(TAG, "Ensuring reporting scheduler: consentGranted=$consentGranted, reportingMode=${reportingMode.name}")
         ReportingScheduler.schedule(this, consentGranted, reportingMode.name)
     }
 
-    private fun triggerReporting(onComplete: ((Boolean) -> Unit)? = null) {
+    private fun triggerReporting(
+        triggerReason: ReportingScheduler.TriggerReason = ReportingScheduler.TriggerReason.Scheduled,
+        onComplete: ((ReportingScheduler.ReportingResult) -> Unit)? = null,
+    ) {
         Log.d(TAG, "Triggering reporting: reportingMode=${reportingMode.name}")
-        ReportingScheduler.recordTrigger(this, reportingMode.name) { success ->
-            Log.d(TAG, "Reporting trigger completed: success=$success")
-            if (success) {
-                refreshLastReportedAt()
-            }
-            onComplete?.invoke(success)
+        ReportingScheduler.recordTrigger(this, reportingMode.name, triggerReason) { result ->
+            Log.d(TAG, "Reporting trigger completed: outcome=${result.outcome}, samples=${result.sampleCount}, batchId=${result.batchId}, error=${result.error}")
+            refreshLastReportedAt()
+            onComplete?.invoke(result)
         }
     }
 
@@ -1247,20 +1283,89 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
-    private fun reportingSummary(): String =
-        getString(
-            R.string.setting_reporting_mode_summary_with_last_sent,
+    private fun reportingSummary(): String {
+        val status = ReportingScheduler.status(this)
+        val lines = mutableListOf(
             reportingMode.summary,
-            lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
+            "",
+            getString(
+                R.string.reporting_last_sent_line,
+                lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
+            ),
         )
+        reportingNextUploadLine()?.let(lines::add)
+        if (status.failedBatchCount > 0 && status.latestError != null) {
+            lines.add(getString(R.string.reporting_last_failure_line, status.latestError))
+        }
+        return lines.joinToString("\n")
+    }
+
+    private fun reportingNextUploadLine(): String? {
+        if (!reportingMode.isScheduledMode()) return null
+        val nextUploadAt = nextScheduledUploadAt()
+        val remaining = Duration.between(Instant.now(), nextUploadAt)
+        return getString(R.string.reporting_next_upload_line, formatReportingCountdown(remaining))
+    }
+
+    private fun nextScheduledUploadAt(): Instant {
+        val now = Instant.now()
+        return when (reportingMode) {
+            ReportingMode.Every15Minutes -> nextIntervalUploadAt(now, AppConfig.Reporting.every15MinutesInterval)
+            ReportingMode.Hourly -> nextIntervalUploadAt(now, AppConfig.Reporting.hourlyInterval)
+            ReportingMode.Daily -> java.time.ZonedDateTime.now()
+                .plusDays(1)
+                .toLocalDate()
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+            ReportingMode.Continuous,
+            ReportingMode.Manual -> now
+        }
+    }
+
+    private fun nextIntervalUploadAt(now: Instant, interval: Duration): Instant {
+        val last = lastReportedAt ?: return now.plus(interval)
+        val next = last.plus(interval)
+        return if (next.isAfter(now)) next else now
+    }
+
+    private fun formatReportingCountdown(remaining: Duration): String {
+        val totalMinutes = ((remaining.seconds.coerceAtLeast(0L) + 59L) / 60L).coerceAtLeast(1L)
+        val hours = totalMinutes / 60L
+        val minutes = totalMinutes % 60L
+        return if (hours > 0L) {
+            val hoursText = resources.getQuantityString(R.plurals.reporting_countdown_hours, hours.toInt(), hours)
+            if (minutes == 0L) {
+                hoursText
+            } else {
+                getString(
+                    R.string.reporting_countdown_hours_minutes,
+                    hoursText,
+                    resources.getQuantityString(R.plurals.reporting_countdown_minutes, minutes.toInt(), minutes),
+                )
+            }
+        } else {
+            resources.getQuantityString(R.plurals.reporting_countdown_minutes, minutes.toInt(), minutes)
+        }
+    }
+
+    private fun ReportingMode.isScheduledMode(): Boolean =
+        this == ReportingMode.Every15Minutes || this == ReportingMode.Hourly || this == ReportingMode.Daily
 
     private fun coverageDataSummary(): String {
         val stats = coverageDataStore.stats()
-        return resources.getQuantityString(
-            R.plurals.coverage_data_summary,
-            stats.sampleCount,
-            stats.sampleCount,
-            stats.dayCount,
+        val queuedSampleCount = ReportingScheduler.status(this).queuedSampleCount
+        return getString(
+            R.string.coverage_data_settings_summary,
+            resources.getQuantityString(
+                R.plurals.coverage_data_sample_count_short,
+                stats.sampleCount,
+                stats.sampleCount,
+            ),
+            resources.getQuantityString(
+                R.plurals.coverage_data_queued_count,
+                queuedSampleCount,
+                queuedSampleCount,
+            ),
         )
     }
 
@@ -1819,20 +1924,28 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun sendNow() {
-        triggerReporting { success ->
+        triggerReporting(ReportingScheduler.TriggerReason.Manual) { result ->
             AlertDialog.Builder(this)
                 .setTitle(getString(R.string.setting_send_now_title))
-                .setMessage(
-                    if (success) {
-                        getString(R.string.setting_send_now_success_message)
-                    } else {
-                        getString(R.string.setting_send_now_failed_message)
-                    },
-                )
+                .setMessage(sendNowResultMessage(result))
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
         }
     }
+
+    private fun sendNowResultMessage(result: ReportingScheduler.ReportingResult): String =
+        when (result.outcome) {
+            ReportingScheduler.Outcome.Sent -> getString(
+                R.string.setting_send_now_success_message,
+                result.sampleCount,
+                formatBytes(result.payloadBytes),
+            )
+            ReportingScheduler.Outcome.NoSamples -> getString(R.string.setting_send_now_no_samples_message)
+            ReportingScheduler.Outcome.Failed -> getString(
+                R.string.setting_send_now_failed_message,
+                result.error ?: getString(R.string.reporting_error_unknown),
+            )
+        }
 
     private fun roundedBackground(color: Int, radius: Int): GradientDrawable =
         GradientDrawable().apply {
@@ -2948,9 +3061,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val TAG = "5GScanner"
         const val CONSENT_TRANSITION_DELAY_MS = 250L
         const val SCANNER_PERMISSION_REQUEST_CODE = 7001
-        const val INSPECTOR_SAMPLE_LIMIT = 25
-        const val RECENT_EXPORT_SAMPLE_LIMIT = 1_000
         const val GNSS_AGE_TICK_MS = 1_000L
+        const val REPORTING_COUNTDOWN_REFRESH_MS = 60_000L
         const val QUALITY_ANIMATION_DURATION_MS = 420L
         const val QUALITY_ANIMATION_FRAME_MS = 16L
         val SCANNER_BACKGROUND: Int = Color.rgb(0, 38, 62)

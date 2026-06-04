@@ -1,5 +1,6 @@
 package no.politiet.pit.telemetry
 
+import no.politiet.pit.AppConfig
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.LteCell
 import no.politiet.pit.domain.Signal
@@ -87,20 +88,20 @@ data class ScannerTelemetrySnapshot(
             val maxAgeSeconds = maxUsableFixAgeSeconds(gnss.fix.speed)
             val freshness = (1f - (ageSeconds / maxAgeSeconds)).coerceIn(0f, 1f)
             val accuracy = gnss.horizontalAccuracyMeters?.let { accuracyMeters ->
-                (1f - ((accuracyMeters - EXCELLENT_ACCURACY_METERS) / (MAX_USABLE_ACCURACY_METERS - EXCELLENT_ACCURACY_METERS))).coerceIn(0f, 1f)
+                (1f - ((accuracyMeters - EXCELLENT_ACCURACY_METERS) / (AppConfig.Scanner.maxHorizontalAccuracyMeters - EXCELLENT_ACCURACY_METERS))).coerceIn(0f, 1f)
             } ?: 0.55f
-            val hdop = (1f - ((gnss.fix.hdop.toFloat() - EXCELLENT_HDOP) / (MAX_USABLE_HDOP - EXCELLENT_HDOP))).coerceIn(0f, 1f)
+            val hdop = (1f - ((gnss.fix.hdop.toFloat() - EXCELLENT_HDOP) / (AppConfig.Scanner.maxHdop.toFloat() - EXCELLENT_HDOP))).coerceIn(0f, 1f)
             val precision = (accuracy * 0.82f + hdop * 0.18f).coerceIn(0f, 1f)
             val isUsable = ageSeconds < maxAgeSeconds &&
-                (gnss.horizontalAccuracyMeters == null || gnss.horizontalAccuracyMeters <= MAX_USABLE_ACCURACY_METERS) &&
-                gnss.fix.hdop <= MAX_USABLE_HDOP
+                (gnss.horizontalAccuracyMeters == null || gnss.horizontalAccuracyMeters <= AppConfig.Scanner.maxHorizontalAccuracyMeters) &&
+                gnss.fix.hdop <= AppConfig.Scanner.maxHdop
             return GnssUsability(
                 quality = if (isUsable) (freshness * precision).coerceIn(0f, 1f) else 0f,
                 isUsable = isUsable,
                 reason = when {
                     ageSeconds >= maxAgeSeconds -> "Fix too old"
-                    gnss.horizontalAccuracyMeters != null && gnss.horizontalAccuracyMeters > MAX_USABLE_ACCURACY_METERS -> "Too imprecise"
-                    gnss.fix.hdop > MAX_USABLE_HDOP -> "Weak fix"
+                    gnss.horizontalAccuracyMeters != null && gnss.horizontalAccuracyMeters > AppConfig.Scanner.maxHorizontalAccuracyMeters -> "Too imprecise"
+                    gnss.fix.hdop > AppConfig.Scanner.maxHdop -> "Weak fix"
                     else -> null
                 },
             )
@@ -111,16 +112,14 @@ data class ScannerTelemetrySnapshot(
 
         private fun maxUsableFixAgeSeconds(speedMetersPerSecond: Double?): Float =
             when {
-                speedMetersPerSecond == null -> 10f
-                speedMetersPerSecond >= 10.0 -> 5f
-                speedMetersPerSecond >= 2.0 -> 10f
-                else -> 30f
+                speedMetersPerSecond == null -> AppConfig.Scanner.maxSlowFixAgeSeconds.toFloat()
+                speedMetersPerSecond >= AppConfig.Scanner.fastSpeedMetersPerSecond -> AppConfig.Scanner.maxFastFixAgeSeconds.toFloat()
+                speedMetersPerSecond >= AppConfig.Scanner.slowSpeedMetersPerSecond -> AppConfig.Scanner.maxSlowFixAgeSeconds.toFloat()
+                else -> AppConfig.Scanner.maxStationaryFixAgeSeconds.toFloat()
             }
 
         private const val EXCELLENT_ACCURACY_METERS = 5f
-        private const val MAX_USABLE_ACCURACY_METERS = 50f
         private const val EXCELLENT_HDOP = 0.7f
-        private const val MAX_USABLE_HDOP = 4.0f
 
         private fun formatHorizontalAccuracy(horizontalAccuracyMeters: Float?): String =
             horizontalAccuracyMeters?.let { "±${it.toInt()}m" } ?: "±?m"

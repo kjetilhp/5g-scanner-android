@@ -10,12 +10,17 @@ import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import java.net.HttpURLConnection
-import java.net.URL
+import no.politiet.pit.AppConfig
+import no.politiet.pit.storage.CoverageDatabaseProvider
+import no.politiet.pit.storage.CoverageDatabase
+import no.politiet.pit.storage.CoverageSampleEntity
+import no.politiet.pit.storage.ReportingBatchEntity
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.UUID
+import java.util.concurrent.Callable
 
 object ReportingScheduler {
     const val PREFS_NAME = "scanner_settings"
@@ -28,12 +33,37 @@ object ReportingScheduler {
     private const val REQUEST_REPORTING = 1001
     private const val MODE_DAILY = "Daily"
     private const val MODE_HOURLY = "Hourly"
+    private const val MODE_EVERY_15_MINUTES = "Every15Minutes"
     private const val MODE_CONTINUOUS = "Continuous"
     private const val MODE_MANUAL = "Manual"
-    private const val HOURLY_INTERVAL_MS = 60 * 60 * 1_000L
-    private const val DAILY_INTERVAL_MS = 24 * 60 * 60 * 1_000L
-    private const val NOOP_URL = "https://www.google.com/generate_204"
-    private const val NETWORK_TIMEOUT_MS = 5_000
+
+    data class ReportingResult(
+        val outcome: Outcome,
+        val sampleCount: Int = 0,
+        val payloadBytes: Long = 0,
+        val batchId: String? = null,
+        val error: String? = null,
+    ) {
+        val success: Boolean
+            get() = outcome == Outcome.Sent || outcome == Outcome.NoSamples
+    }
+
+    enum class Outcome {
+        Sent,
+        NoSamples,
+        Failed,
+    }
+
+    enum class TriggerReason {
+        Scheduled,
+        Manual,
+    }
+
+    data class ReportingStatus(
+        val queuedSampleCount: Int,
+        val failedBatchCount: Int,
+        val latestError: String?,
+    )
 
     fun appPreferences(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -41,14 +71,14 @@ object ReportingScheduler {
     fun scheduleFromPreferences(context: Context) {
         val preferences = appPreferences(context)
         val consentGranted = preferences.getBoolean(KEY_CONSENT_GRANTED, false)
-        val reportingMode = preferences.getString(KEY_REPORTING_MODE, MODE_HOURLY)
+        val reportingMode = preferences.getString(KEY_REPORTING_MODE, AppConfig.Defaults.reportingMode.name)
         schedule(context, consentGranted, reportingMode)
     }
 
     fun scheduleOnLaunch(context: Context) {
         val preferences = appPreferences(context)
         val consentGranted = preferences.getBoolean(KEY_CONSENT_GRANTED, false)
-        val reportingMode = preferences.getString(KEY_REPORTING_MODE, MODE_HOURLY)
+        val reportingMode = preferences.getString(KEY_REPORTING_MODE, AppConfig.Defaults.reportingMode.name)
         schedule(context, consentGranted, reportingMode)
         triggerMissedReportIfDue(context, consentGranted, reportingMode, reason = "launch")
     }
@@ -93,38 +123,42 @@ object ReportingScheduler {
     fun recordTrigger(
         context: Context,
         reportingMode: String,
-        onComplete: ((Boolean) -> Unit)? = null,
+        triggerReason: TriggerReason = TriggerReason.Scheduled,
+        onComplete: ((ReportingResult) -> Unit)? = null,
     ) {
         val appContext = context.applicationContext
-        Thread {
-            val success = hasNetworkConnection(appContext) && performNoopNetworkCall()
-            if (success) {
-                val reportedAt = Instant.now()
-                appPreferences(appContext).edit()
-                    .putString(KEY_LAST_REPORTED_AT, reportedAt.toString())
-                    .apply()
-                Log.i(TAG, "Reporting trigger: mode=$reportingMode, lastReportedAt=$reportedAt")
-            } else {
-                Log.i(TAG, "Reporting trigger skipped: mode=$reportingMode, noopNetworkCall=false")
-            }
+        CoverageDatabaseProvider.ioExecutor.execute {
+            val result = runReportingTrigger(appContext, reportingMode, triggerReason)
             onComplete?.let { callback ->
                 Handler(Looper.getMainLooper()).post {
-                    callback(success)
+                    callback(result)
                 }
             }
-        }.start()
+        }
     }
 
     fun recordTriggerFromPreferences(
         context: Context,
-        onComplete: ((Boolean) -> Unit)? = null,
+        onComplete: ((ReportingResult) -> Unit)? = null,
     ) {
-        val reportingMode = appPreferences(context).getString(KEY_REPORTING_MODE, MODE_HOURLY) ?: MODE_HOURLY
-        recordTrigger(context, reportingMode, onComplete)
+        val reportingMode = appPreferences(context).getString(KEY_REPORTING_MODE, AppConfig.Defaults.reportingMode.name)
+            ?: AppConfig.Defaults.reportingMode.name
+        recordTrigger(context, reportingMode, TriggerReason.Scheduled, onComplete)
     }
 
     fun lastReportedAt(context: Context): Instant? =
         appPreferences(context).getString(KEY_LAST_REPORTED_AT, null)?.let(Instant::parse)
+
+    fun status(context: Context): ReportingStatus =
+        CoverageDatabaseProvider.ioExecutor.submit(Callable {
+            val database = CoverageDatabaseProvider.database(context)
+            val batchDao = database.reportingBatchDao()
+            ReportingStatus(
+                queuedSampleCount = database.coverageSampleDao().queuedUploadCount(),
+                failedBatchCount = batchDao.countByStatus(ReportingBatchEntity.StatusFailed),
+                latestError = batchDao.latestErrorForStatus(ReportingBatchEntity.StatusFailed),
+            )
+        }).get()
 
     private fun triggerMissedReportIfDue(
         context: Context,
@@ -136,7 +170,7 @@ object ReportingScheduler {
             Log.i(TAG, "Missed reporting check skipped: reason=$reason, consentGranted=false")
             return
         }
-        if (reportingMode != MODE_HOURLY && reportingMode != MODE_DAILY) {
+        if (reportingMode != MODE_EVERY_15_MINUTES && reportingMode != MODE_HOURLY && reportingMode != MODE_DAILY) {
             Log.i(TAG, "Missed reporting check skipped: reason=$reason, mode=$reportingMode")
             return
         }
@@ -148,26 +182,33 @@ object ReportingScheduler {
         }
 
         Log.i(TAG, "Triggering missed reporting: reason=$reason, mode=$reportingMode, lastReportedAt=$lastReportedAt")
-        recordTrigger(context, reportingMode)
+        recordTrigger(context, reportingMode, TriggerReason.Scheduled)
     }
 
     private fun alarmSchedule(reportingMode: String?): AlarmSchedule? =
         when (reportingMode) {
-            MODE_DAILY -> AlarmSchedule(nextLocalMidnightMillis(), DAILY_INTERVAL_MS)
-            MODE_HOURLY -> AlarmSchedule(System.currentTimeMillis() + HOURLY_INTERVAL_MS, HOURLY_INTERVAL_MS)
+            MODE_DAILY -> AlarmSchedule(nextLocalMidnightMillis(), AppConfig.Reporting.dailyInterval.toMillis())
+            MODE_EVERY_15_MINUTES -> intervalSchedule(AppConfig.Reporting.every15MinutesInterval)
+            MODE_HOURLY -> intervalSchedule(AppConfig.Reporting.hourlyInterval)
             else -> null
         }
 
     private fun isMissedReportDue(reportingMode: String?, lastReportedAt: Instant?, now: Instant): Boolean {
         if (lastReportedAt == null) return true
         return when (reportingMode) {
-            MODE_HOURLY -> Duration.between(lastReportedAt, now).toMillis() >= HOURLY_INTERVAL_MS
+            MODE_EVERY_15_MINUTES -> Duration.between(lastReportedAt, now) >= AppConfig.Reporting.every15MinutesInterval
+            MODE_HOURLY -> Duration.between(lastReportedAt, now) >= AppConfig.Reporting.hourlyInterval
             MODE_DAILY -> {
                 val zone = ZoneId.systemDefault()
                 lastReportedAt.atZone(zone).toLocalDate().isBefore(now.atZone(zone).toLocalDate())
             }
             else -> false
         }
+    }
+
+    private fun intervalSchedule(interval: Duration): AlarmSchedule {
+        val intervalMs = interval.toMillis()
+        return AlarmSchedule(System.currentTimeMillis() + intervalMs, intervalMs)
     }
 
     private fun nextLocalMidnightMillis(): Long =
@@ -178,27 +219,184 @@ object ReportingScheduler {
             .toInstant()
             .toEpochMilli()
 
+    private fun runReportingTrigger(
+        context: Context,
+        reportingMode: String,
+        triggerReason: TriggerReason,
+    ): ReportingResult {
+        val db = CoverageDatabaseProvider.database(context)
+        val sampleDao = db.coverageSampleDao()
+        val batchDao = db.reportingBatchDao()
+        val now = Instant.now()
+        val nowEpochMillis = now.toEpochMilli()
+        val unresolvedStatuses = listOf(ReportingBatchEntity.StatusFailed, ReportingBatchEntity.StatusInFlight)
+        val unresolvedBatch = batchDao.oldestBatch(unresolvedStatuses)
+        val batchAndSamples = if (unresolvedBatch != null) {
+            val nextAttemptAt = unresolvedBatch.nextAttemptAtEpochMillis
+            val isBackingOff = unresolvedBatch.status == ReportingBatchEntity.StatusFailed &&
+                nextAttemptAt != null &&
+                nextAttemptAt > nowEpochMillis
+            val isActiveInFlight = unresolvedBatch.status == ReportingBatchEntity.StatusInFlight &&
+                nextAttemptAt != null &&
+                nextAttemptAt > nowEpochMillis
+            if (isActiveInFlight) {
+                val error = "Send already in progress"
+                Log.i(TAG, "Reporting trigger deferred: mode=$reportingMode, batchId=${unresolvedBatch.id}, reason=$error")
+                return ReportingResult(Outcome.Failed, batchId = unresolvedBatch.id, error = error)
+            }
+            if (isBackingOff && triggerReason != TriggerReason.Manual) {
+                val error = "Next retry scheduled at ${Instant.ofEpochMilli(nextAttemptAt)}"
+                Log.i(TAG, "Reporting trigger deferred: mode=$reportingMode, batchId=${unresolvedBatch.id}, reason=$error")
+                return ReportingResult(Outcome.Failed, batchId = unresolvedBatch.id, error = error)
+            }
+            unresolvedBatch to sampleDao.samplesForUploadBatch(unresolvedBatch.id)
+        } else {
+            claimPendingBatch(db, nowEpochMillis)
+        } ?: run {
+            Log.i(TAG, "Reporting trigger complete: mode=$reportingMode, result=no_samples")
+            return ReportingResult(Outcome.NoSamples)
+        }
+
+        val (batch, samples) = batchAndSamples
+        if (samples.isEmpty()) {
+            val error = "Batch has no samples"
+            val nextAttemptAt = nowEpochMillis + backoffMillis(batch.attemptCount + 1)
+            batchDao.markFailed(batch.id, ReportingBatchEntity.StatusFailed, nextAttemptAt, error)
+            Log.i(TAG, "Reporting trigger failed: mode=$reportingMode, batchId=${batch.id}, reason=$error")
+            return ReportingResult(Outcome.Failed, batchId = batch.id, error = error)
+        }
+
+        val nextAttemptAt = nowEpochMillis + backoffMillis(batch.attemptCount + 1)
+        val expectedStatuses = when (batch.status) {
+            ReportingBatchEntity.StatusFailed -> listOf(ReportingBatchEntity.StatusFailed)
+            ReportingBatchEntity.StatusInFlight -> listOf(ReportingBatchEntity.StatusInFlight)
+            else -> emptyList()
+        }
+        if (expectedStatuses.isEmpty()) {
+            val error = "Batch is not retryable"
+            Log.i(TAG, "Reporting trigger deferred: mode=$reportingMode, batchId=${batch.id}, status=${batch.status}, reason=$error")
+            return ReportingResult(Outcome.Failed, batchId = batch.id, error = error)
+        }
+        val started = batchDao.markAttemptStartedIfStatus(
+            batchId = batch.id,
+            expectedStatuses = expectedStatuses,
+            status = ReportingBatchEntity.StatusInFlight,
+            attemptedAtEpochMillis = nowEpochMillis,
+            nextAttemptAtEpochMillis = nextAttemptAt,
+        )
+        if (started == 0) {
+            val error = "Send already in progress"
+            Log.i(TAG, "Reporting trigger deferred: mode=$reportingMode, batchId=${batch.id}, reason=$error")
+            return ReportingResult(Outcome.Failed, batchId = batch.id, error = error)
+        }
+        sampleDao.markBatchAttemptStarted(batch.id, CoverageSampleEntity.UploadStatusInFlight)
+
+        val payload = buildJsonl(samples)
+        val payloadBytes = payload.toByteArray(Charsets.UTF_8).size.toLong()
+        val error = if (hasNetworkConnection(context)) null else "No network connection"
+        if (error == null) {
+            val uploadedAt = Instant.now()
+            val uploadedAtEpochMillis = uploadedAt.toEpochMilli()
+            batchDao.markUploaded(batch.id, ReportingBatchEntity.StatusUploaded, uploadedAtEpochMillis)
+            sampleDao.markBatchUploaded(batch.id, CoverageSampleEntity.UploadStatusUploaded, uploadedAtEpochMillis)
+            appPreferences(context).edit()
+                .putString(KEY_LAST_REPORTED_AT, uploadedAt.toString())
+                .apply()
+            Log.i(
+                TAG,
+                "Reporting trigger complete: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=$payloadBytes, result=sent",
+            )
+            return ReportingResult(
+                outcome = Outcome.Sent,
+                sampleCount = samples.size,
+                payloadBytes = payloadBytes,
+                batchId = batch.id,
+            )
+        }
+
+        batchDao.markFailed(batch.id, ReportingBatchEntity.StatusFailed, nextAttemptAt, error)
+        sampleDao.markBatchFailed(batch.id, CoverageSampleEntity.UploadStatusFailed, error)
+        Log.i(
+            TAG,
+            "Reporting trigger failed: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=$payloadBytes, nextAttemptAt=${Instant.ofEpochMilli(nextAttemptAt)}, reason=$error",
+        )
+        return ReportingResult(
+            outcome = Outcome.Failed,
+            sampleCount = samples.size,
+            payloadBytes = payloadBytes,
+            batchId = batch.id,
+            error = error,
+        )
+    }
+
+    private fun claimPendingBatch(db: CoverageDatabase, nowEpochMillis: Long): Pair<ReportingBatchEntity, List<CoverageSampleEntity>>? {
+        var claimed: Pair<ReportingBatchEntity, List<CoverageSampleEntity>>? = null
+        db.runInTransaction {
+            val sampleDao = db.coverageSampleDao()
+            val batchDao = db.reportingBatchDao()
+            val candidates = sampleDao.oldestSamplesByUploadStatus(
+                status = CoverageSampleEntity.UploadStatusPending,
+                limit = AppConfig.Reporting.maxSamplesPerBatch,
+            )
+            val selected = selectBatchSamples(candidates)
+            if (selected.isEmpty()) return@runInTransaction
+
+            val batchId = UUID.randomUUID().toString()
+            val payloadBytes = buildJsonl(selected).toByteArray(Charsets.UTF_8).size.toLong()
+            val batch = ReportingBatchEntity(
+                id = batchId,
+                status = ReportingBatchEntity.StatusInFlight,
+                createdAtEpochMillis = nowEpochMillis,
+                firstSampleId = selected.first().id,
+                lastSampleId = selected.last().id,
+                sampleCount = selected.size,
+                payloadBytes = payloadBytes,
+                nextAttemptAtEpochMillis = nowEpochMillis + backoffMillis(1),
+            )
+            batchDao.insert(batch)
+            sampleDao.markClaimed(
+                sampleIds = selected.map { it.id },
+                batchId = batchId,
+                status = CoverageSampleEntity.UploadStatusInFlight,
+            )
+            claimed = batch to selected
+        }
+        return claimed
+    }
+
+    private fun selectBatchSamples(samples: List<CoverageSampleEntity>): List<CoverageSampleEntity> {
+        val selected = mutableListOf<CoverageSampleEntity>()
+        var bytes = 0
+        for (sample in samples) {
+            val lineBytes = jsonlLineBytes(sample)
+            if (selected.isNotEmpty() && bytes + lineBytes > AppConfig.Reporting.maxBatchBytes) break
+            selected.add(sample)
+            bytes += lineBytes
+        }
+        return selected
+    }
+
+    private fun buildJsonl(samples: List<CoverageSampleEntity>): String =
+        buildString {
+            samples.forEach { sample ->
+                append(sample.sampleJson)
+                append('\n')
+            }
+        }
+
+    private fun jsonlLineBytes(sample: CoverageSampleEntity): Int =
+        sample.sampleJson.toByteArray(Charsets.UTF_8).size + 1
+
+    private fun backoffMillis(nextAttemptNumber: Int): Long =
+        AppConfig.Reporting.retryBackoff[
+            (nextAttemptNumber.coerceAtLeast(1) - 1).coerceAtMost(AppConfig.Reporting.retryBackoff.lastIndex)
+        ].toMillis()
+
     private fun hasNetworkConnection(context: Context): Boolean {
         val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
         val network = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-    private fun performNoopNetworkCall(): Boolean {
-        val connection = URL(NOOP_URL).openConnection() as HttpURLConnection
-        return try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = NETWORK_TIMEOUT_MS
-            connection.readTimeout = NETWORK_TIMEOUT_MS
-            connection.useCaches = false
-            connection.responseCode in 200..399
-        } catch (error: Exception) {
-            Log.i(TAG, "No-op reporting network call failed", error)
-            false
-        } finally {
-            connection.disconnect()
-        }
     }
 
     private fun reportingPendingIntent(context: Context): PendingIntent =

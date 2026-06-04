@@ -80,7 +80,9 @@ class CoverageDataStore(private val context: Context) {
         CoverageExportFileProvider.exportUriFor(context, file)
 
     fun deleteAllSamples(): Int = dbQuery {
-        CoverageDatabaseProvider.database(context).coverageSampleDao().deleteAll()
+        val database = CoverageDatabaseProvider.database(context)
+        database.reportingBatchDao().deleteAll()
+        database.coverageSampleDao().deleteAll()
     }
 
     private fun exportDirectory(): File =

@@ -62,14 +62,20 @@
     <string name="about_app_body">%2$s\nVersion %1$s</string>
     <string name="setting_gnss_mode_title">Location mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
-    <string name="setting_reporting_mode_summary_with_last_sent">%1$s\n\nLast sent: %2$s</string>
+    <string name="reporting_last_sent_line">Last sent %1$s</string>
+    <string name="reporting_next_upload_line">Next upload in %1$s</string>
+    <string name="reporting_countdown_hours_minutes">%1$s %2$s</string>
+    <string name="reporting_last_failure_line">Last failure: %1$s</string>
     <string name="setting_send_now_title">Send now</string>
     <string name="setting_send_now_summary">Send queued coverage samples stored on this device.</string>
-    <string name="setting_send_now_success_message">No-op send succeeded. Last sent has been updated.</string>
-    <string name="setting_send_now_failed_message">No-op send failed. Check the network connection and try again.</string>
+    <string name="setting_send_now_success_message">Sent %1$d queued coverage samples (%2$s).</string>
+    <string name="setting_send_now_no_samples_message">No queued coverage samples to send.</string>
+    <string name="setting_send_now_failed_message">Could not send queued coverage samples: %1$s</string>
+    <string name="reporting_error_unknown">unknown error</string>
     <string name="setting_recorded_coverage_data_title">Recorded coverage data</string>
+    <string name="coverage_data_settings_summary">%1$s (%2$s)</string>
     <string name="coverage_data_summary_title">Stored on this device</string>
-    <string name="coverage_data_storage_summary">%1$s, %2$s</string>
+    <string name="coverage_data_storage_summary">%1$s, %2$s (%3$s)</string>
     <string name="coverage_data_actions_title">Actions</string>
     <string name="coverage_data_recent_title">Recent samples</string>
     <string name="coverage_sample_detail_title">Sample details</string>
@@ -82,12 +88,24 @@
     <string name="delete_all_coverage_data_summary">Delete all coverage samples stored on this device.</string>
     <string name="delete_all_coverage_data_confirm_message">Delete all coverage samples? This cannot be undone.</string>
     <string name="delete_all_coverage_data_confirm_action">Delete</string>
-    <plurals name="coverage_data_summary">
-        <item quantity="one">%1$d sample, %2$d day</item>
-        <item quantity="other">%1$d samples, %2$d days</item>
-    </plurals>
     <plurals name="coverage_data_sample_count">
         <item quantity="one">%1$d coverage sample</item>
         <item quantity="other">%1$d coverage samples</item>
+    </plurals>
+    <plurals name="coverage_data_sample_count_short">
+        <item quantity="one">%1$d sample</item>
+        <item quantity="other">%1$d samples</item>
+    </plurals>
+    <plurals name="coverage_data_queued_count">
+        <item quantity="one">%1$d queued</item>
+        <item quantity="other">%1$d queued</item>
+    </plurals>
+    <plurals name="reporting_countdown_hours">
+        <item quantity="one">%1$d hour</item>
+        <item quantity="other">%1$d hours</item>
+    </plurals>
+    <plurals name="reporting_countdown_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
     </plurals>
 </resources>

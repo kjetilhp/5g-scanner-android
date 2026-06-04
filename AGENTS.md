@@ -84,7 +84,7 @@ Active scanning should run in a foreground service with a visible notification. 
 
 Initial versions should assume local-first sample persistence. Reporting behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
-The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources. Accepted samples are written to a local Room/SQLite database with upload bookkeeping fields. JSONL is internal to reporting/compatibility and must not be presented as the normal user export format. CSV is generated on demand for user-facing export. Settings includes reporting controls, a simple recorded coverage data inspector with CSV export actions, and deleting all local coverage samples after confirmation.
+The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources. Accepted samples are written to a local Room/SQLite database with upload bookkeeping fields and mock reporting batches. JSONL is internal to reporting/compatibility and must not be presented as the normal user export format. CSV is generated on demand for user-facing export. Settings includes reporting controls, a recorded coverage data view with CSV export actions, and deleting all local coverage samples after confirmation.
 
 Telemetry source selection goes through `TelemetrySourceFactory`. The About screen includes a Developer `Mock telemetry` toggle that defaults on for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. Turning it off on a physical device should route through Android collector classes; keep those classes behind the same `RadioTelemetrySource` and `GnssTelemetrySource` interfaces. The scanner UI should indicate active mock telemetry with a subtle `MOCK` badge.
 
@@ -127,3 +127,5 @@ When adding Android code, keep modules separated roughly as:
 App icons are based on `assets/icon/source.svg`. Android launcher icons use adaptive icon XML plus `app/src/main/res/drawable/ic_launcher_foreground.xml`; run `npm run icons` after changing the source to refresh generated favicon files.
 
 Do not commit large generated datasets unless they are intentionally curated fixtures.
+
+Runtime defaults and tuning values that are natural to adjust during development belong in `app/src/main/java/no/politiet/pit/AppConfig.kt` rather than being redefined across Activity, service, storage, reporting, or telemetry classes.

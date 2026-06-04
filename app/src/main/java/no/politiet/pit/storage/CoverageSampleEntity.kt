@@ -43,6 +43,9 @@ data class CoverageSampleEntity(
 ) {
     companion object {
         const val UploadStatusPending = "pending"
+        const val UploadStatusInFlight = "in_flight"
+        const val UploadStatusUploaded = "uploaded"
+        const val UploadStatusFailed = "failed"
 
         private val dayFormatter = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC)
 

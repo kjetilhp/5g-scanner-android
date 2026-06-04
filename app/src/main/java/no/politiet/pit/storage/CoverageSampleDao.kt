@@ -72,6 +72,76 @@ interface CoverageSampleDao {
         limit: Int,
     ): List<CoverageSampleEntity>
 
+    @Query(
+        """
+        SELECT * FROM coverage_samples
+        WHERE upload_status = :status
+        ORDER BY id ASC
+        LIMIT :limit
+        """,
+    )
+    fun oldestSamplesByUploadStatus(status: String, limit: Int): List<CoverageSampleEntity>
+
+    @Query(
+        """
+        SELECT * FROM coverage_samples
+        WHERE upload_batch_id = :batchId
+        ORDER BY id ASC
+        """,
+    )
+    fun samplesForUploadBatch(batchId: String): List<CoverageSampleEntity>
+
+    @Query(
+        """
+        UPDATE coverage_samples
+        SET upload_status = :status,
+            upload_batch_id = :batchId,
+            last_upload_error = NULL
+        WHERE id IN (:sampleIds)
+        """,
+    )
+    fun markClaimed(sampleIds: List<Long>, batchId: String, status: String): Int
+
+    @Query(
+        """
+        UPDATE coverage_samples
+        SET upload_status = :status,
+            uploaded_at_epoch_millis = :uploadedAtEpochMillis,
+            last_upload_error = NULL
+        WHERE upload_batch_id = :batchId
+        """,
+    )
+    fun markBatchUploaded(batchId: String, status: String, uploadedAtEpochMillis: Long): Int
+
+    @Query(
+        """
+        UPDATE coverage_samples
+        SET upload_status = :status,
+            upload_attempt_count = upload_attempt_count + 1,
+            last_upload_error = NULL
+        WHERE upload_batch_id = :batchId
+        """,
+    )
+    fun markBatchAttemptStarted(batchId: String, status: String): Int
+
+    @Query(
+        """
+        UPDATE coverage_samples
+        SET upload_status = :status,
+            last_upload_error = :lastError
+        WHERE upload_batch_id = :batchId
+        """,
+    )
+    fun markBatchFailed(batchId: String, status: String, lastError: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM coverage_samples
+        WHERE upload_status != :uploadedStatus
+        """,
+    )
+    fun queuedUploadCount(uploadedStatus: String = CoverageSampleEntity.UploadStatusUploaded): Int
+
     @Query("DELETE FROM coverage_samples")
     fun deleteAll(): Int
 }

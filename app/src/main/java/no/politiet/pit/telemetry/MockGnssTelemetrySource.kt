@@ -2,6 +2,7 @@ package no.politiet.pit.telemetry
 
 import no.politiet.pit.domain.Fix
 import no.politiet.pit.domain.GnssMode
+import no.politiet.pit.AppConfig
 import java.time.Duration
 import java.time.Instant
 
@@ -85,16 +86,16 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
     private fun isUsableAt(snapshot: MockFixSnapshot, capturedAt: Instant): Boolean {
         val ageSeconds = Duration.between(snapshot.fix.timestamp, capturedAt).seconds.coerceAtLeast(0L)
         return ageSeconds < maxUsableFixAgeSeconds(snapshot.fix.speed) &&
-            snapshot.horizontalAccuracyMeters <= MAX_USABLE_ACCURACY_METERS &&
-            snapshot.fix.hdop <= MAX_USABLE_HDOP
+            snapshot.horizontalAccuracyMeters <= AppConfig.Scanner.maxHorizontalAccuracyMeters &&
+            snapshot.fix.hdop <= AppConfig.Scanner.maxHdop
     }
 
     private fun maxUsableFixAgeSeconds(speedMetersPerSecond: Double?): Long =
         when {
-            speedMetersPerSecond == null -> 10L
-            speedMetersPerSecond >= 10.0 -> 5L
-            speedMetersPerSecond >= 2.0 -> 10L
-            else -> 30L
+            speedMetersPerSecond == null -> AppConfig.Scanner.maxSlowFixAgeSeconds.toLong()
+            speedMetersPerSecond >= AppConfig.Scanner.fastSpeedMetersPerSecond -> AppConfig.Scanner.maxFastFixAgeSeconds.toLong()
+            speedMetersPerSecond >= AppConfig.Scanner.slowSpeedMetersPerSecond -> AppConfig.Scanner.maxSlowFixAgeSeconds.toLong()
+            else -> AppConfig.Scanner.maxStationaryFixAgeSeconds.toLong()
         }
 
     private fun profileFor(gnssMode: GnssMode): MockGnssProfile =
@@ -152,9 +153,4 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
         val degradedAccuracyMeters: Float,
         val degradedSatellites: Int,
     )
-
-    private companion object {
-        const val MAX_USABLE_ACCURACY_METERS = 50f
-        const val MAX_USABLE_HDOP = 4.0
-    }
 }

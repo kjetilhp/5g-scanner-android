@@ -4,10 +4,11 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [CoverageSampleEntity::class],
-    version = 2,
+    entities = [CoverageSampleEntity::class, ReportingBatchEntity::class],
+    version = 3,
     exportSchema = false,
 )
 abstract class CoverageDatabase : RoomDatabase() {
     abstract fun coverageSampleDao(): CoverageSampleDao
+    abstract fun reportingBatchDao(): ReportingBatchDao
 }

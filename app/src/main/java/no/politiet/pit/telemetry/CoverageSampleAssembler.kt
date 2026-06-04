@@ -1,18 +1,19 @@
 package no.politiet.pit.telemetry
 
+import no.politiet.pit.AppConfig
 import no.politiet.pit.domain.ServingSample
 import java.time.Duration
 
 object CoverageSampleAssembler {
     data class GnssQualityThresholds(
-        val maxStationaryFixAgeSeconds: Int = 30,
-        val maxSlowFixAgeSeconds: Int = 10,
-        val maxFastFixAgeSeconds: Int = 5,
-        val slowSpeedMetersPerSecond: Double = 2.0,
-        val fastSpeedMetersPerSecond: Double = 10.0,
-        val maxHorizontalAccuracyMeters: Float = 50f,
-        val maxHdop: Double = 4.0,
-        val maxSnapshotAgeSeconds: Long = 30,
+        val maxStationaryFixAgeSeconds: Int = AppConfig.Scanner.maxStationaryFixAgeSeconds,
+        val maxSlowFixAgeSeconds: Int = AppConfig.Scanner.maxSlowFixAgeSeconds,
+        val maxFastFixAgeSeconds: Int = AppConfig.Scanner.maxFastFixAgeSeconds,
+        val slowSpeedMetersPerSecond: Double = AppConfig.Scanner.slowSpeedMetersPerSecond,
+        val fastSpeedMetersPerSecond: Double = AppConfig.Scanner.fastSpeedMetersPerSecond,
+        val maxHorizontalAccuracyMeters: Float = AppConfig.Scanner.maxHorizontalAccuracyMeters,
+        val maxHdop: Double = AppConfig.Scanner.maxHdop,
+        val maxSnapshotAgeSeconds: Long = AppConfig.Scanner.maxSnapshotAgeSeconds,
     )
 
     sealed interface AssemblyResult {

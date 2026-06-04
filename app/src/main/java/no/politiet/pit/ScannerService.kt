@@ -18,7 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
-import no.politiet.pit.domain.CoverageSamplePrivacyReducer
+import no.politiet.pit.domain.CoverageSampleEnhancedPrivacyTransformer
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
 import no.politiet.pit.encoding.CoverageSampleJsonEncoder
@@ -40,23 +40,25 @@ class ScannerService : Service() {
     private lateinit var radioTelemetrySource: RadioTelemetrySource
     private lateinit var gnssTelemetrySource: GnssTelemetrySource
     private val gnssQualityThresholds = CoverageSampleAssembler.GnssQualityThresholds(
-        maxStationaryFixAgeSeconds = 30,
-        maxSlowFixAgeSeconds = 10,
-        maxFastFixAgeSeconds = 5,
-        maxHorizontalAccuracyMeters = 50f,
-        maxHdop = 4.0,
-        maxSnapshotAgeSeconds = 30,
+        maxStationaryFixAgeSeconds = AppConfig.Scanner.maxStationaryFixAgeSeconds,
+        maxSlowFixAgeSeconds = AppConfig.Scanner.maxSlowFixAgeSeconds,
+        maxFastFixAgeSeconds = AppConfig.Scanner.maxFastFixAgeSeconds,
+        slowSpeedMetersPerSecond = AppConfig.Scanner.slowSpeedMetersPerSecond,
+        fastSpeedMetersPerSecond = AppConfig.Scanner.fastSpeedMetersPerSecond,
+        maxHorizontalAccuracyMeters = AppConfig.Scanner.maxHorizontalAccuracyMeters,
+        maxHdop = AppConfig.Scanner.maxHdop,
+        maxSnapshotAgeSeconds = AppConfig.Scanner.maxSnapshotAgeSeconds,
     )
     private var sampleCount = 0
-    private var latestTelemetry = ScannerTelemetrySnapshot.initial(GnssMode.Balanced)
+    private var latestTelemetry = ScannerTelemetrySnapshot.initial(AppConfig.Defaults.gnssMode)
     private var sampleScheduled = false
     private var gnssRefreshScheduled = false
-    private var gnssMode = GnssMode.Balanced
-    private var telemetryGnssMode = GnssMode.Balanced
-    private var reportingMode = ReportingMode.Hourly
-    private var mockTelemetryEnabled = true
-    private var enhancedPrivacyEnabled = false
-    private var effectiveMockTelemetry = true
+    private var gnssMode = AppConfig.Defaults.gnssMode
+    private var telemetryGnssMode = AppConfig.Defaults.gnssMode
+    private var reportingMode = AppConfig.Defaults.reportingMode
+    private var mockTelemetryEnabled = AppConfig.Defaults.mockTelemetryEnabled
+    private var enhancedPrivacyEnabled = AppConfig.Defaults.enhancedPrivacyEnabled
+    private var effectiveMockTelemetry = AppConfig.Defaults.mockTelemetryEnabled
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -65,10 +67,10 @@ class ScannerService : Service() {
                 stopScannerService()
             } else if (scannerErrorReason() == null) {
                 captureSample()
-                scheduleNextSample(SAMPLE_INTERVAL_MS)
+                scheduleNextSample(AppConfig.Scanner.sampleIntervalMs)
             } else {
                 publishState()
-                scheduleNextSample(ERROR_RECHECK_INTERVAL_MS)
+                scheduleNextSample(AppConfig.Scanner.errorRecheckIntervalMs)
             }
         }
     }
@@ -83,7 +85,7 @@ class ScannerService : Service() {
                 scheduleGnssRefresh(gnssRefreshIntervalMs())
             } else {
                 publishState()
-                scheduleGnssRefresh(ERROR_RECHECK_INTERVAL_MS)
+                scheduleGnssRefresh(AppConfig.Scanner.errorRecheckIntervalMs)
             }
         }
     }
@@ -243,7 +245,7 @@ class ScannerService : Service() {
                 }
             }
             val storedSample = if (enhancedPrivacyEnabled) {
-                CoverageSamplePrivacyReducer.reduce(sample)
+                CoverageSampleEnhancedPrivacyTransformer.reduce(sample)
             } else {
                 sample
             }
@@ -302,9 +304,9 @@ class ScannerService : Service() {
 
     private fun gnssRefreshIntervalMs(): Long =
         when (gnssMode) {
-            GnssMode.HighAccuracy -> 5_000L
-            GnssMode.Balanced -> 11_000L
-            GnssMode.LowPower -> 29_000L
+            GnssMode.HighAccuracy -> AppConfig.Scanner.highAccuracyGnssRefreshMs
+            GnssMode.Balanced -> AppConfig.Scanner.balancedGnssRefreshMs
+            GnssMode.LowPower -> AppConfig.Scanner.lowPowerGnssRefreshMs
         }
 
     private fun publishState() {
@@ -393,8 +395,6 @@ class ScannerService : Service() {
         private const val TAG = "5GScanner"
         private const val NOTIFICATION_ID = 4201
         private const val NOTIFICATION_CHANNEL_ID = "scanner"
-        private const val SAMPLE_INTERVAL_MS = 15_000L
-        private const val ERROR_RECHECK_INTERVAL_MS = 5_000L
         private val SCANNER_RUNNING_COLOR = Color.rgb(0, 38, 62)
         private val SCANNER_ERROR_COLOR = Color.rgb(207, 69, 32)
 
@@ -404,7 +404,7 @@ class ScannerService : Service() {
             errorReason = null,
             mockTelemetryActive = true,
             sampleCount = 0,
-            latestTelemetry = ScannerTelemetrySnapshot.initial(GnssMode.Balanced),
+            latestTelemetry = ScannerTelemetrySnapshot.initial(AppConfig.Defaults.gnssMode),
         )
             private set
 

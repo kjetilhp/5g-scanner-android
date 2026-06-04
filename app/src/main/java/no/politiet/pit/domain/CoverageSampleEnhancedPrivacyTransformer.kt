@@ -1,13 +1,12 @@
 package no.politiet.pit.domain
 
+import no.politiet.pit.AppConfig
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.math.cos
 import kotlin.math.floor
 
-object CoverageSamplePrivacyReducer {
-    const val GRID_CELL_SIZE_METERS: Double = 50.0
-
+object CoverageSampleEnhancedPrivacyTransformer {
     fun reduce(sample: CoverageSample): CoverageSample {
         val reducedFix = sample.fix.reduced()
         return when (sample) {
@@ -19,7 +18,7 @@ object CoverageSamplePrivacyReducer {
 
     private fun Fix.reduced(): Fix {
         val snappedTimestamp = timestamp.snappedToUtcMidnight()
-        val gridCenter = LatLon(lat, lon).snappedToCellCenter(GRID_CELL_SIZE_METERS)
+        val gridCenter = LatLon(lat, lon).snappedToCellCenter(AppConfig.EnhancedPrivacy.gridCellSizeMeters)
         return copy(
             timestamp = snappedTimestamp,
             gpsTime = gpsTime?.snappedToUtcMidnight(),
