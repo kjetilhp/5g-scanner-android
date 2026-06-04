@@ -2,6 +2,7 @@ package no.politiet.pit.storage
 
 import android.content.Context
 import android.net.Uri
+import no.politiet.pit.domain.CoordinatePrecision
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -97,6 +98,7 @@ class CoverageDataStore(private val context: Context) {
             else -> null
         }
         val signal = cell?.optJSONObject("signal")
+        val displayJson = json?.normalizedCoordinateJson() ?: sampleJson
         return InspectionSample(
             id = id,
             capturedAtEpochMillis = capturedAtEpochMillis,
@@ -108,11 +110,11 @@ class CoverageDataStore(private val context: Context) {
             band = cell.optStringValue("band"),
             rsrp = signal.optStringValue("rsrp"),
             sinr = signal.optStringValue("sinr"),
-            lat = fix.optStringValue("lat"),
-            lon = fix.optStringValue("lon"),
+            lat = fix.optCoordinateValue("lat"),
+            lon = fix.optCoordinateValue("lon"),
             mockTelemetry = mockTelemetry,
             uploadStatus = uploadStatus,
-            sampleJson = sampleJson,
+            sampleJson = displayJson,
         )
     }
 
@@ -150,8 +152,8 @@ class CoverageDataStore(private val context: Context) {
             "sample_kind" to kind,
             "fix_timestamp" to fix.optStringValue("timestamp"),
             "gps_time" to fix.optStringValue("gpsTime"),
-            "lat" to fix.optStringValue("lat"),
-            "lon" to fix.optStringValue("lon"),
+            "lat" to fix.optCoordinateValue("lat"),
+            "lon" to fix.optCoordinateValue("lon"),
             "altitude" to fix.optStringValue("altitude"),
             "speed" to fix.optStringValue("speed"),
             "heading" to fix.optStringValue("heading"),
@@ -197,6 +199,25 @@ class CoverageDataStore(private val context: Context) {
     private fun JSONObject?.optStringValue(name: String): String {
         if (this == null || isNull(name) || !has(name)) return ""
         return opt(name)?.toString().orEmpty()
+    }
+
+    private fun JSONObject?.optCoordinateValue(name: String): String =
+        CoordinatePrecision.display(optStringValue(name))
+
+    private fun JSONObject.normalizedCoordinateJson(): String {
+        val normalized = JSONObject(toString())
+        normalized.optJSONObject("fix")?.apply {
+            normalizeCoordinate("lat")
+            normalizeCoordinate("lon")
+        }
+        return normalized.toString()
+    }
+
+    private fun JSONObject.normalizeCoordinate(name: String) {
+        val value = optDouble(name, Double.NaN)
+        if (!value.isNaN()) {
+            put(name, CoordinatePrecision.rounded(value))
+        }
     }
 
     private fun csvEscape(value: String): String {

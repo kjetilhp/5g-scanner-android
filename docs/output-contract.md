@@ -115,4 +115,6 @@ sinr: number
 rssi?: number
 ```
 
+Android rounds `lat` and `lon` to five decimal places before persistence and display.
+
 Android devices may omit some signal metrics. When the app implementation begins, decide whether Android-specific partial readings require a compatible extension or a stricter filtering step before sample persistence.
