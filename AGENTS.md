@@ -24,6 +24,20 @@ Keep Android API usage at the edges. Domain models, encoders, and validation sho
 
 The first Android app experience should be simple and consent-led: users voluntarily participate in crowdsourced coverage mapping and can pause scanning temporarily. Consent must be a blocking full-screen gate; scanner controls and settings should not be shown until app-level consent is granted. In the current prototype, stopping participation after consent is handled by stopping scanning or uninstalling the app rather than an in-app revoke control.
 
+## Terminology
+
+Use these terms consistently in user-facing text, code comments, docs, and implementation names:
+
+- Coverage sample: one accepted measurement record produced by the scanner.
+- Recorded coverage data: the local collection of coverage samples stored on this device.
+- Local database: the Room/SQLite store and app source of truth.
+- CSV export: the user-facing export artifact generated from selected database rows.
+- Reporting: sending queued coverage samples according to the reporting setting.
+- JSONL contract: the internal compatibility shape shared with the Node reference scanner. JSONL is not a user-facing export format.
+- Scanner states: stopped, running, and error.
+
+Avoid obsolete storage terms such as log, log file, daily file, and daily JSONL when describing app persistence. The app no longer stores coverage data as files.
+
 ## Reference Contract
 
 The current reference output is append-only JSONL, one coverage sample per line.

@@ -14,6 +14,20 @@ The product direction is a consent-led background coverage collector. Most users
 
 Storage is local-first, with reporting controlled by the app's reporting setting.
 
+## Terminology
+
+Use these nouns consistently in user-facing text, code comments, docs, and agent work:
+
+- Coverage sample: one accepted measurement record produced by the scanner.
+- Recorded coverage data: the local collection of coverage samples stored on this device.
+- Local database: the Room/SQLite store. This is the app's source of truth.
+- CSV export: the user-facing export artifact generated from selected database rows.
+- Reporting: sending queued coverage samples according to the reporting setting.
+- JSONL contract: the internal compatibility shape shared with the Node reference scanner. JSONL is not a user-facing export format.
+- Scanner states: stopped, running, and error.
+
+Avoid obsolete storage terms such as log, log file, daily file, and daily JSONL when describing app persistence. The app no longer stores coverage data as files.
+
 ## Reference Project
 
 The existing Node/TypeScript scanner should be linked as a Git submodule at:
@@ -108,7 +122,7 @@ The first target format is append-only JSON Lines:
 one CoverageSample JSON object per line
 ```
 
-The Android prototype stores accepted samples in Room/SQLite. JSONL is still the internal compatibility contract for reporting and tests, but it is not the user-facing export format and is not written as daily files.
+The Android prototype stores accepted samples in Room/SQLite. JSONL is still the internal compatibility contract for reporting and tests, but it is not the user-facing export format.
 
 See [docs/output-contract.md](docs/output-contract.md) for the current contract notes.
 
