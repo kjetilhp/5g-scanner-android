@@ -608,12 +608,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (recentSamples.isNotEmpty()) {
             content.addView(settingsSectionLabel(getString(R.string.coverage_data_recent_title)))
             content.addView(settingsGroup(*recentSamples.map { sample ->
-                settingsActionRow(
-                    title = inspectionSampleTitle(sample),
-                    summary = inspectionSampleSummary(sample),
-                ) {
-                    showInspectionSampleDetails(sample)
-                }
+                inspectionSampleRow(sample)
             }.toTypedArray()))
         }
 
@@ -646,21 +641,64 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             append(dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis)))
             append(" - ")
             append(sample.rat.ifBlank { sample.kind })
+            sample.band.takeIf { it.isNotBlank() }?.let { band ->
+                append(" - Band ")
+                append(band)
+            }
             if (sample.mockTelemetry) append(" - MOCK")
         }
 
-    private fun inspectionSampleSummary(sample: CoverageDataStore.InspectionSample): String {
-        val signal = listOfNotNull(
-            sample.rsrp.takeIf { it.isNotBlank() }?.let { "RSRP $it" },
-            sample.sinr.takeIf { it.isNotBlank() }?.let { "SINR $it" },
-        ).joinToString(", ").ifBlank { "Signal unavailable" }
-        val location = if (sample.lat.isNotBlank() && sample.lon.isNotBlank()) {
-            "${sample.lat}, ${sample.lon}"
-        } else {
-            "Location unavailable"
+    private fun inspectionSampleRow(sample: CoverageDataStore.InspectionSample): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            minimumHeight = dp(86)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = rippleBackground(Color.WHITE, dp(16))
+            isFocusable = true
+            setOnClickListener { showInspectionSampleDetails(sample) }
+
+            addView(TextView(this@MainActivity).apply {
+                text = inspectionSampleTitle(sample)
+                textSize = 15f
+                setTextColor(SETTINGS_TEXT)
+                includeFontPadding = false
+                maxLines = 1
+            })
+            addView(InspectionSampleBarsView(sample.inspectionMetricBars()), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(42),
+            ).apply {
+                topMargin = dp(10)
+            })
         }
-        return "$signal\n$location\n${sample.uploadStatus}"
-    }
+
+    private fun CoverageDataStore.InspectionSample.inspectionMetricBars(): List<InspectionMetricBar> =
+        listOf(
+            InspectionMetricBar(
+                label = "RSRP",
+                valueText = rsrp.ifBlank { "-" },
+                quality = rsrp.toFloatOrNull()?.let(::rsrpQuality) ?: 0f,
+                hasValue = rsrp.isNotBlank(),
+            ),
+            InspectionMetricBar(
+                label = "SINR",
+                valueText = sinr.ifBlank { "-" },
+                quality = sinr.toFloatOrNull()?.let(::sinrQuality) ?: 0f,
+                hasValue = sinr.isNotBlank(),
+            ),
+            InspectionMetricBar(
+                label = "LOC",
+                valueText = if (lat.isNotBlank() && lon.isNotBlank()) "OK" else "-",
+                quality = if (lat.isNotBlank() && lon.isNotBlank()) 0.78f else 0f,
+                hasValue = lat.isNotBlank() && lon.isNotBlank(),
+            ),
+        )
+
+    private fun rsrpQuality(value: Float): Float =
+        ((value + 120f) / 40f).coerceIn(0f, 1f)
+
+    private fun sinrQuality(value: Float): Float =
+        ((value + 5f) / 30f).coerceIn(0f, 1f)
 
     private fun showInspectionSampleDetails(sample: CoverageDataStore.InspectionSample) {
         AlertDialog.Builder(this)
@@ -2194,6 +2232,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val startedAtMs: Long,
     )
 
+    private data class InspectionMetricBar(
+        val label: String,
+        val valueText: String,
+        val quality: Float,
+        val hasValue: Boolean,
+    )
+
     private inner class TelemetryBarsView : View(this@MainActivity) {
         private var metrics: List<MetricQuality> = emptyList()
         private var showNoData = false
@@ -2689,6 +2734,65 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         private fun signalBaseline(): Float =
             height * 0.84f
+    }
+
+    private inner class InspectionSampleBarsView(
+        private val bars: List<InspectionMetricBar>,
+    ) : View(this@MainActivity) {
+        private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(36, 91, 103, 119)
+            style = Paint.Style.FILL
+        }
+        private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SETTINGS_SUBTLE_TEXT
+            textAlign = Paint.Align.LEFT
+            textSize = dp(10).toFloat()
+        }
+        private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = SETTINGS_TEXT
+            textAlign = Paint.Align.RIGHT
+            textSize = dp(10).toFloat()
+        }
+        private val barBounds = RectF()
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (bars.isEmpty()) return
+
+            val gap = dp(10).toFloat()
+            val segmentWidth = (width - gap * (bars.size - 1)) / bars.size.toFloat()
+            val trackTop = dp(18).toFloat()
+            val trackHeight = dp(7).toFloat()
+            val radius = trackHeight / 2f
+
+            bars.forEachIndexed { index, bar ->
+                val left = index * (segmentWidth + gap)
+                val right = left + segmentWidth
+                val labelBaseline = dp(10).toFloat()
+                labelPaint.alpha = if (bar.hasValue) 210 else 110
+                valuePaint.alpha = if (bar.hasValue) 220 else 110
+                canvas.drawText(bar.label, left, labelBaseline, labelPaint)
+                canvas.drawText(bar.valueText, right, labelBaseline, valuePaint)
+
+                barBounds.set(left, trackTop, right, trackTop + trackHeight)
+                trackPaint.alpha = if (bar.hasValue) 46 else 26
+                canvas.drawRoundRect(barBounds, radius, radius, trackPaint)
+
+                val fillRight = left + segmentWidth * bar.quality.coerceIn(0f, 1f)
+                fillPaint.color = if (bar.hasValue) qualityColor(bar.quality) else SETTINGS_DIVIDER
+                fillPaint.alpha = if (bar.hasValue) 170 else 80
+                barBounds.set(left, trackTop, fillRight, trackTop + trackHeight)
+                canvas.drawRoundRect(barBounds, radius, radius, fillPaint)
+            }
+
+            labelPaint.alpha = 255
+            valuePaint.alpha = 255
+            trackPaint.alpha = 255
+            fillPaint.alpha = 255
+        }
     }
 
     private fun qualityColor(quality: Float): Int {
