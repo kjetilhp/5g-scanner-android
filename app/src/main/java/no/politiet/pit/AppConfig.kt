@@ -41,7 +41,9 @@ object AppConfig {
         val hourlyInterval: Duration = Duration.ofHours(1)
         val dailyInterval: Duration = Duration.ofDays(1)
         const val useMockTransport: Boolean = false
-        const val endpointUrl: String = "http://10.0.2.2:8080/api/coverage-samples"
+        const val emulatorHostEndpointUrl: String = "http://10.0.2.2:8080/api/coverage-samples"
+        const val physicalDeviceEndpointUrl: String = "http://YOUR_LAN_IP:8080/api/coverage-samples"
+        const val endpointUrl: String = emulatorHostEndpointUrl
         const val connectTimeoutMs: Int = 10_000
         const val readTimeoutMs: Int = 20_000
         const val contentType: String = "application/x-ndjson"

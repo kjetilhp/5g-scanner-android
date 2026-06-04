@@ -149,7 +149,7 @@ Mock radio/GNSS sources are active for emulator development. Android radio/GNSS 
 
 Runtime defaults and tuning values that are natural to adjust during development live in `app/src/main/java/no/politiet/pit/AppConfig.kt`. This includes settings defaults, scanner cadence, GNSS quality gates, enhanced privacy precision, reporting intervals/backoff/batch limits, the reporting endpoint and transport mode, and recorded coverage data display/export limits.
 
-Reporting uses a small `ReportingTransport` boundary. The default prototype endpoint is `http://10.0.2.2:8080/api/coverage-samples`, which reaches a backend running on the host machine from the Android emulator. Cleartext HTTP is enabled until TLS and the real backend endpoint are decided. A mock reporting transport remains available through `AppConfig.Reporting.useMockTransport` for development.
+Reporting uses a small `ReportingTransport` boundary. The default prototype endpoint is `http://10.0.2.2:8080/api/coverage-samples`, which reaches a backend running on the host machine from the Android emulator. For physical device testing, update `AppConfig.Reporting.endpointUrl` to use `physicalDeviceEndpointUrl` after setting `physicalDeviceEndpointUrl` to a backend URL reachable from the phone, such as the host PC's LAN IP. Cleartext HTTP is enabled until TLS and the real backend endpoint are decided. A mock reporting transport remains available through `AppConfig.Reporting.useMockTransport` for development.
 
 Enhanced privacy is applied before a sample is stored. It snaps fix timestamps to UTC midnight, snaps coordinates to the configured grid-cell center, coarsens altitude, removes speed and heading, and replaces precise GNSS quality details with configured privacy-mode values.
 
