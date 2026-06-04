@@ -513,12 +513,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 sendNow()
             })
         }
-        reportingRows.add(settingsDestructiveActionRow(
-            title = getString(R.string.delete_all_coverage_data_title),
-            summary = getString(R.string.delete_all_coverage_data_summary),
-        ) {
-            confirmDeleteAllSamples()
-        })
         content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
         content.addView(settingsGroup(*reportingRows.toTypedArray()))
 
@@ -593,6 +587,24 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 summary = getString(R.string.coverage_data_inspector_summary),
             ),
         ))
+        if (stats.sampleCount > 0) {
+            content.addView(settingsSectionLabel(getString(R.string.coverage_data_actions_title)))
+            content.addView(settingsGroup(
+                settingsActionRow(
+                    title = getString(R.string.coverage_export_csv_title),
+                    summary = getString(R.string.coverage_export_csv_summary),
+                    titleColor = SETTINGS_ACCENT,
+                ) {
+                    showExportCsvActions()
+                },
+                settingsDestructiveActionRow(
+                    title = getString(R.string.delete_all_coverage_data_title),
+                    summary = getString(R.string.delete_all_coverage_data_summary),
+                ) {
+                    confirmDeleteAllSamples()
+                },
+            ))
+        }
         if (recentSamples.isNotEmpty()) {
             content.addView(settingsSectionLabel(getString(R.string.coverage_data_recent_title)))
             content.addView(settingsGroup(*recentSamples.map { sample ->
@@ -603,17 +615,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     showInspectionSampleDetails(sample)
                 }
             }.toTypedArray()))
-        }
-        if (stats.sampleCount > 0) {
-            content.addView(settingsGroup(
-                settingsActionRow(
-                    title = getString(R.string.coverage_export_csv_title),
-                    summary = getString(R.string.coverage_export_csv_summary),
-                    titleColor = SETTINGS_ACCENT,
-                ) {
-                    showExportCsvActions()
-                },
-            ))
         }
 
         return settingsScreen(
