@@ -37,6 +37,11 @@ object AppConfig {
         val every15MinutesInterval: Duration = Duration.ofMinutes(15)
         val hourlyInterval: Duration = Duration.ofHours(1)
         val dailyInterval: Duration = Duration.ofDays(1)
+        const val useMockTransport: Boolean = false
+        const val endpointUrl: String = "http://10.0.2.2:8080/api/coverage-samples"
+        const val connectTimeoutMs: Int = 10_000
+        const val readTimeoutMs: Int = 20_000
+        const val contentType: String = "application/x-ndjson"
         const val maxSamplesPerBatch: Int = 1_000
         const val maxBatchBytes: Int = 2 * 1024 * 1024
         val retryBackoff: List<Duration> = listOf(

@@ -83,6 +83,9 @@ interface ReportingBatchDao {
     @Query("DELETE FROM reporting_batches")
     fun deleteAll(): Int
 
+    @Query("DELETE FROM reporting_batches WHERE id = :batchId")
+    fun deleteById(batchId: String): Int
+
     @Query(
         """
         DELETE FROM reporting_batches

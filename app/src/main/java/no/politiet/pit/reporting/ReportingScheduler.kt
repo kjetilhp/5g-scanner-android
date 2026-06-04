@@ -5,8 +5,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -224,6 +222,52 @@ object ReportingScheduler {
         reportingMode: String,
         triggerReason: TriggerReason,
     ): ReportingResult {
+        var sentSamples = 0
+        var sentBytes = 0L
+        var lastBatchId: String? = null
+
+        while (true) {
+            val result = runReportingTriggerOnce(context, reportingMode, triggerReason)
+            when (result.outcome) {
+                Outcome.Sent -> {
+                    sentSamples += result.sampleCount
+                    sentBytes += result.payloadBytes
+                    lastBatchId = result.batchId
+                }
+                Outcome.NoSamples -> {
+                    return if (sentSamples > 0) {
+                        Log.i(
+                            TAG,
+                            "Reporting trigger complete: mode=$reportingMode, result=sent_all, samples=$sentSamples, payloadBytes=$sentBytes",
+                        )
+                        ReportingResult(
+                            outcome = Outcome.Sent,
+                            sampleCount = sentSamples,
+                            payloadBytes = sentBytes,
+                            batchId = lastBatchId,
+                        )
+                    } else {
+                        result
+                    }
+                }
+                Outcome.Failed -> {
+                    if (sentSamples > 0) {
+                        Log.i(
+                            TAG,
+                            "Reporting trigger stopped after partial send: mode=$reportingMode, sentSamples=$sentSamples, sentBytes=$sentBytes, error=${result.error}",
+                        )
+                    }
+                    return result
+                }
+            }
+        }
+    }
+
+    private fun runReportingTriggerOnce(
+        context: Context,
+        reportingMode: String,
+        triggerReason: TriggerReason,
+    ): ReportingResult {
         val db = CoverageDatabaseProvider.database(context)
         val sampleDao = db.coverageSampleDao()
         val batchDao = db.reportingBatchDao()
@@ -253,17 +297,21 @@ object ReportingScheduler {
         } else {
             claimPendingBatch(db, nowEpochMillis)
         } ?: run {
-            Log.i(TAG, "Reporting trigger complete: mode=$reportingMode, result=no_samples")
+            Log.i(TAG, "Reporting trigger complete: mode=$reportingMode, result=no_samples, reason=up_to_date")
             return ReportingResult(Outcome.NoSamples)
         }
 
-        val (batch, samples) = batchAndSamples
+        var (batch, samples) = batchAndSamples
         if (samples.isEmpty()) {
-            val error = "Batch has no samples"
-            val nextAttemptAt = nowEpochMillis + backoffMillis(batch.attemptCount + 1)
-            batchDao.markFailed(batch.id, ReportingBatchEntity.StatusFailed, nextAttemptAt, error)
-            Log.i(TAG, "Reporting trigger failed: mode=$reportingMode, batchId=${batch.id}, reason=$error")
-            return ReportingResult(Outcome.Failed, batchId = batch.id, error = error)
+            batchDao.deleteById(batch.id)
+            Log.i(TAG, "Removed empty reporting batch: batchId=${batch.id}")
+            val pendingBatchAndSamples = claimPendingBatch(db, nowEpochMillis)
+            if (pendingBatchAndSamples == null) {
+                Log.i(TAG, "Reporting trigger complete: mode=$reportingMode, result=no_samples, reason=up_to_date")
+                return ReportingResult(Outcome.NoSamples)
+            }
+            batch = pendingBatchAndSamples.first
+            samples = pendingBatchAndSamples.second
         }
 
         val nextAttemptAt = nowEpochMillis + backoffMillis(batch.attemptCount + 1)
@@ -291,42 +339,52 @@ object ReportingScheduler {
         }
         sampleDao.markBatchAttemptStarted(batch.id, CoverageSampleEntity.UploadStatusInFlight)
 
-        val payload = buildJsonl(samples)
-        val payloadBytes = payload.toByteArray(Charsets.UTF_8).size.toLong()
-        val error = if (hasNetworkConnection(context)) null else "No network connection"
-        if (error == null) {
-            val uploadedAt = Instant.now()
-            val uploadedAtEpochMillis = uploadedAt.toEpochMilli()
-            batchDao.markUploaded(batch.id, ReportingBatchEntity.StatusUploaded, uploadedAtEpochMillis)
-            sampleDao.markBatchUploaded(batch.id, CoverageSampleEntity.UploadStatusUploaded, uploadedAtEpochMillis)
-            appPreferences(context).edit()
-                .putString(KEY_LAST_REPORTED_AT, uploadedAt.toString())
-                .apply()
-            Log.i(
-                TAG,
-                "Reporting trigger complete: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=$payloadBytes, result=sent",
-            )
-            return ReportingResult(
-                outcome = Outcome.Sent,
-                sampleCount = samples.size,
-                payloadBytes = payloadBytes,
-                batchId = batch.id,
-            )
-        }
-
-        batchDao.markFailed(batch.id, ReportingBatchEntity.StatusFailed, nextAttemptAt, error)
-        sampleDao.markBatchFailed(batch.id, CoverageSampleEntity.UploadStatusFailed, error)
-        Log.i(
-            TAG,
-            "Reporting trigger failed: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=$payloadBytes, nextAttemptAt=${Instant.ofEpochMilli(nextAttemptAt)}, reason=$error",
-        )
-        return ReportingResult(
-            outcome = Outcome.Failed,
-            sampleCount = samples.size,
-            payloadBytes = payloadBytes,
+        val jsonl = buildJsonl(samples)
+        val payload = ReportingPayload(
             batchId = batch.id,
-            error = error,
+            sampleCount = samples.size,
+            payloadBytes = jsonl.toByteArray(Charsets.UTF_8).size.toLong(),
+            jsonl = jsonl,
         )
+        val transport = reportingTransport()
+        when (val transportResult = transport.post(payload)) {
+            ReportingTransportResult.Success -> {
+                val uploadedAt = Instant.now()
+                val uploadedAtEpochMillis = uploadedAt.toEpochMilli()
+                batchDao.markUploaded(batch.id, ReportingBatchEntity.StatusUploaded, uploadedAtEpochMillis)
+                sampleDao.markBatchUploaded(batch.id, CoverageSampleEntity.UploadStatusUploaded, uploadedAtEpochMillis)
+                appPreferences(context).edit()
+                    .putString(KEY_LAST_REPORTED_AT, uploadedAt.toString())
+                    .apply()
+                Log.i(
+                    TAG,
+                    "Reporting trigger complete: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=${payload.payloadBytes}, result=sent",
+                )
+                return ReportingResult(
+                    outcome = Outcome.Sent,
+                    sampleCount = samples.size,
+                    payloadBytes = payload.payloadBytes,
+                    batchId = batch.id,
+                )
+            }
+
+            is ReportingTransportResult.Failure -> {
+                val error = transportResult.reason
+                batchDao.markFailed(batch.id, ReportingBatchEntity.StatusFailed, nextAttemptAt, error)
+                sampleDao.markBatchFailed(batch.id, CoverageSampleEntity.UploadStatusFailed, error)
+                Log.i(
+                    TAG,
+                    "Reporting trigger failed: mode=$reportingMode, batchId=${batch.id}, samples=${samples.size}, payloadBytes=${payload.payloadBytes}, nextAttemptAt=${Instant.ofEpochMilli(nextAttemptAt)}, retryable=${transportResult.retryable}, reason=$error",
+                )
+                return ReportingResult(
+                    outcome = Outcome.Failed,
+                    sampleCount = samples.size,
+                    payloadBytes = payload.payloadBytes,
+                    batchId = batch.id,
+                    error = error,
+                )
+            }
+        }
     }
 
     private fun claimPendingBatch(db: CoverageDatabase, nowEpochMillis: Long): Pair<ReportingBatchEntity, List<CoverageSampleEntity>>? {
@@ -392,12 +450,14 @@ object ReportingScheduler {
             (nextAttemptNumber.coerceAtLeast(1) - 1).coerceAtMost(AppConfig.Reporting.retryBackoff.lastIndex)
         ].toMillis()
 
-    private fun hasNetworkConnection(context: Context): Boolean {
-        val connectivityManager = context.getSystemService(ConnectivityManager::class.java)
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+    private fun reportingTransport(): ReportingTransport =
+        if (AppConfig.Reporting.useMockTransport) {
+            Log.i(TAG, "Reporting transport: mock")
+            MockReportingTransport()
+        } else {
+            Log.i(TAG, "Reporting transport: http endpoint=${AppConfig.Reporting.endpointUrl}")
+            HttpReportingTransport()
+        }
 
     private fun reportingPendingIntent(context: Context): PendingIntent =
         PendingIntent.getBroadcast(

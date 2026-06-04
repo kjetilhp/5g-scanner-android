@@ -109,6 +109,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var settingsRefreshScheduled = false
     private var reportingCountdownRefreshScheduled = false
     private var pendingAnimatedSampleId: Long? = null
+    private var pendingMainSettingsScrollY: Int? = null
     private var pendingCoverageDataScrollY: Int? = null
     private var scannerStateReceiverRegistered = false
     private lateinit var coverageDataStore: CoverageDataStore
@@ -196,7 +197,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     if (showingSettings && settingsDestination == SettingsDestination.CoverageData) {
                         pendingAnimatedSampleId = intent.getLongExtra(ScannerService.EXTRA_SAMPLE_ID, 0L)
                             .takeIf { it > 0L }
-                        pendingCoverageDataScrollY = activeCoverageDataScrollY()
+                        pendingCoverageDataScrollY = activeSettingsScrollY(COVERAGE_DATA_SCROLL_TAG)
                         render()
                     } else {
                         scheduleSettingsRefresh()
@@ -336,6 +337,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun render(transition: ScreenTransition = ScreenTransition.None) {
+        captureSettingsScrollBeforeRefresh(transition)
         updateSettingsBackCallback()
         val nextView = when {
             !consentGranted -> createConsentView()
@@ -351,6 +353,19 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (consentGranted) {
             ensureSamplerState()
             updateScannerUi()
+        }
+    }
+
+    private fun captureSettingsScrollBeforeRefresh(transition: ScreenTransition) {
+        if (!showingSettings || transition != ScreenTransition.None) return
+        when (settingsDestination) {
+            SettingsDestination.Main -> pendingMainSettingsScrollY = activeSettingsScrollY(MAIN_SETTINGS_SCROLL_TAG)
+            SettingsDestination.CoverageData -> {
+                if (pendingCoverageDataScrollY == null) {
+                    pendingCoverageDataScrollY = activeSettingsScrollY(COVERAGE_DATA_SCROLL_TAG)
+                }
+            }
+            SettingsDestination.About -> Unit
         }
     }
 
@@ -583,7 +598,14 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         val scroller = ScrollView(this).apply {
             setBackgroundColor(SETTINGS_BACKGROUND)
+            tag = MAIN_SETTINGS_SCROLL_TAG
             addView(content)
+            pendingMainSettingsScrollY?.let { scrollY ->
+                post {
+                    scrollTo(0, scrollY)
+                    pendingMainSettingsScrollY = null
+                }
+            }
         }
 
         val root = LinearLayout(this).apply {
@@ -1772,8 +1794,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             ))
         }
 
-    private fun activeCoverageDataScrollY(): Int? =
-        window.decorView.findViewWithTag<ScrollView>(COVERAGE_DATA_SCROLL_TAG)?.scrollY
+    private fun activeSettingsScrollY(tag: String): Int? =
+        window.decorView.findViewWithTag<ScrollView>(tag)?.scrollY
 
     private fun settingsToolbar(
         title: String = getString(R.string.settings_title),
@@ -3193,6 +3215,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val SCANNER_PERMISSION_REQUEST_CODE = 7001
         const val GNSS_AGE_TICK_MS = 1_000L
         const val REPORTING_COUNTDOWN_REFRESH_MS = 60_000L
+        const val MAIN_SETTINGS_SCROLL_TAG = "main-settings-scroll"
         const val COVERAGE_DATA_SCROLL_TAG = "coverage-data-scroll"
         const val QUALITY_ANIMATION_DURATION_MS = 420L
         const val QUALITY_ANIMATION_FRAME_MS = 16L

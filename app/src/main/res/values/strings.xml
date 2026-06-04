@@ -69,7 +69,7 @@
     <string name="setting_send_now_title">Send now</string>
     <string name="setting_send_now_summary">Send queued coverage samples stored on this device.</string>
     <string name="setting_send_now_success_message">Sent %1$d queued coverage samples (%2$s).</string>
-    <string name="setting_send_now_no_samples_message">No queued coverage samples to send.</string>
+    <string name="setting_send_now_no_samples_message">Nothing was sent. Recorded coverage data is up to date.</string>
     <string name="setting_send_now_failed_message">Could not send queued coverage samples: %1$s</string>
     <string name="reporting_error_unknown">unknown error</string>
     <string name="setting_recorded_coverage_data_title">Recorded coverage data</string>

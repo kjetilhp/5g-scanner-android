@@ -12,7 +12,7 @@ Planning and project setup plus a simulator-friendly Android scanner prototype.
 
 The product direction is a consent-led background coverage collector. Most users should only need to grant consent, keep the app installed, and stop scanning when they are off duty or want to save battery. Engineers can inspect recorded samples and tune settings, but the app should stay simple for voluntary crowdsourced participation.
 
-Storage is local-first, with reporting controlled by the app's reporting setting. Reporting currently builds capped JSONL batches from queued rows and uses a mock transport while the backend endpoint is still undefined.
+Storage is local-first, with reporting controlled by the app's reporting setting. Reporting currently builds capped JSONL batches from queued rows and posts them to the configured reporting endpoint.
 
 ## Terminology
 
@@ -87,7 +87,7 @@ The emulator build currently uses mock telemetry. It supports:
 - Blocking first-run consent before scanner controls are shown
 - Grant app-level consent
 - Automatic mock scanning after consent through a foreground scanner service with mock radio and mock GNSS sources
-- Accepted samples persisted in a local Room/SQLite database with upload bookkeeping fields and mock reporting batches
+- Accepted samples persisted in a local Room/SQLite database with upload bookkeeping fields and reporting batches
 - Recorded coverage data inspector backed by the database, with CSV exports generated into temporary cache files
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
@@ -140,7 +140,9 @@ RadioTelemetrySource + GnssTelemetrySource
 
 Mock radio/GNSS sources are active for emulator development. Android radio/GNSS source classes exist as placeholders for the future public API collectors.
 
-Runtime defaults and tuning values that are natural to adjust during development live in `app/src/main/java/no/politiet/pit/AppConfig.kt`. This includes settings defaults, scanner cadence, GNSS quality gates, enhanced privacy precision, reporting intervals/backoff/batch limits, and recorded coverage data display/export limits.
+Runtime defaults and tuning values that are natural to adjust during development live in `app/src/main/java/no/politiet/pit/AppConfig.kt`. This includes settings defaults, scanner cadence, GNSS quality gates, enhanced privacy precision, reporting intervals/backoff/batch limits, the reporting endpoint and transport mode, and recorded coverage data display/export limits.
+
+Reporting uses a small `ReportingTransport` boundary. The default prototype endpoint is `http://10.0.2.2:8080/api/coverage-samples`, which reaches a backend running on the host machine from the Android emulator. Cleartext HTTP is enabled until TLS and the real backend endpoint are decided. A mock reporting transport remains available through `AppConfig.Reporting.useMockTransport` for development.
 
 Running scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
 
