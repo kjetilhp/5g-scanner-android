@@ -375,8 +375,8 @@ class ScannerService : Service() {
         private const val NOTIFICATION_CHANNEL_ID = "scanner"
         private const val SAMPLE_INTERVAL_MS = 15_000L
         private const val ERROR_RECHECK_INTERVAL_MS = 5_000L
-        private val SCANNER_RUNNING_COLOR = Color.rgb(15, 118, 110)
-        private val SCANNER_ERROR_COLOR = Color.rgb(220, 38, 38)
+        private val SCANNER_RUNNING_COLOR = Color.rgb(0, 38, 62)
+        private val SCANNER_ERROR_COLOR = Color.rgb(207, 69, 32)
 
         @Volatile
         var currentState: State = State(

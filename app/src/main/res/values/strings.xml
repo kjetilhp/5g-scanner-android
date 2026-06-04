@@ -55,7 +55,7 @@
     <string name="about_participation_title">Participation</string>
     <string name="about_participation_body">You can stop scanning to pause participation, delete local coverage data, or uninstall the app to stop participating.</string>
     <string name="about_app_title">App</string>
-    <string name="about_app_body">Version %1$s\nPackage %2$s</string>
+    <string name="about_app_body">%2$s\nVersion %1$s</string>
     <string name="setting_gnss_mode_title">Location mode</string>
     <string name="setting_reporting_mode_title">Reporting mode</string>
     <string name="setting_reporting_mode_summary_with_last_sent">%1$s\n\nLast sent: %2$s</string>

@@ -2,7 +2,7 @@
   <title id="title">5G Scanner app icon</title>
   <desc id="desc">A three-out-of-four mobile signal data symbol.</desc>
   <g id="background">
-    <rect width="1024" height="1024" rx="224" fill="#0F766E"/>
+    <rect width="1024" height="1024" rx="224" fill="#00263E"/>
   </g>
   <g id="mark" fill="#FFFFFF">
     <rect x="160" y="640" width="128" height="192" rx="32"/>
