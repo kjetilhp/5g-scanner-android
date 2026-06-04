@@ -6,7 +6,7 @@ Share the output contract with the Node/TypeScript scanner, not the runtime.
 
 The Android app should collect native Android telemetry and map it into Kotlin domain models that serialize to the same JSONL shape as the reference scanner.
 
-The app should be designed around one effective scanner state derived from consent, Android permissions, the user scanning toggle, and pause settings. Scanner work should not run when consent is missing, permissions are missing, scanning is disabled, or scanning is paused.
+The app should be designed around one effective scanner state derived from consent, Android permissions, user intent, and device state. Scanner work should not run when consent is missing, permissions are missing, or scanning is stopped.
 
 ## Proposed Areas
 
@@ -47,7 +47,7 @@ Likely APIs:
 - `SubscriptionManager`
 - `ConnectivityManager`
 - Android location APIs or Google Play Services fused location, decided later
-- Foreground service APIs for long-running active logging
+- Foreground service APIs for long-running scanning
 
 Cellular data should be treated as partial and device-dependent. The app should not assume every phone exposes every LTE or NR metric.
 
@@ -79,7 +79,7 @@ scannerActive
   The foreground service is currently collecting and can attempt to produce samples.
 ```
 
-The foreground service should not immediately stop just because a temporary error appears. Instead, it should pause collection/logging, publish an error reason, keep the foreground notification visible with an error message, and listen or recheck for relevant guard changes. The foreground notification should use the scanner's running green when samples can be produced and a red warning accent when scanning is desired but in error. Use receivers/callbacks for airplane-mode changes, location-provider changes, permission rechecks on app resume, and telephony/connectivity changes where Android exposes them. When the error clears and `scannerDesired` is still true, the service can resume sampling.
+The foreground service should not immediately stop just because a temporary error appears. Instead, it should pause collection/persistence, publish an error reason, keep the foreground notification visible with an error message, and listen or recheck for relevant guard changes. The foreground notification should use the scanner's running green when samples can be produced and a red warning accent when scanning is desired but in error. Use receivers/callbacks for airplane-mode changes, location-provider changes, permission rechecks on app resume, and telephony/connectivity changes where Android exposes them. When the error clears and `scannerDesired` is still true, the service can resume sampling.
 
 Some states remain outside normal resilience: user force-stop, uninstall, app update/reinstall, process death without restart allowance, and reboot. Reboot auto-resume should be treated separately because modern Android may require background-location permission and stronger consent language.
 
@@ -108,9 +108,9 @@ When a new GNSS report arrives:
 
 This preserves sample quality without being overly fragile during brief GNSS/provider regressions. The sample assembler should receive the latest usable fix, not merely the newest reported fix. The UI should primarily show the fix being used for scanner pairing. If the app later gains a detailed diagnostics view, it can separately show that a newer reported fix was rejected.
 
-The current usability gate mirrors the log-emission thresholds: horizontal accuracy must be at most 50 meters when provided, HDOP must be at most 4.0, and fix age is speed-aware. A fix can be held for up to 30 seconds while stationary/slow, 10 seconds at 2 m/s or faster, and 5 seconds at 10 m/s or faster. Unknown speed uses the 10 second slow-moving limit.
+The current usability gate mirrors the sample-acceptance thresholds: horizontal accuracy must be at most 50 meters when provided, HDOP must be at most 4.0, and fix age is speed-aware. A fix can be held for up to 30 seconds while stationary/slow, 10 seconds at 2 m/s or faster, and 5 seconds at 10 m/s or faster. Unknown speed uses the 10 second slow-moving limit.
 
-The assembler owns code-configured GNSS quality thresholds before log emission. Samples should be skipped when GNSS is missing, stale, or too imprecise. The current prototype defaults are max horizontal accuracy 50 meters, max HDOP 4.0, max GNSS snapshot age 30 seconds, and speed-aware fix age limits: 30 seconds while stationary/slow, 10 seconds at 2 m/s or faster, and 5 seconds at 10 m/s or faster. Unknown speed uses the 10 second slow-moving limit.
+The assembler owns code-configured GNSS quality thresholds before sample persistence. Samples should be skipped when GNSS is missing, stale, or too imprecise. The current prototype defaults are max horizontal accuracy 50 meters, max HDOP 4.0, max GNSS snapshot age 30 seconds, and speed-aware fix age limits: 30 seconds while stationary/slow, 10 seconds at 2 m/s or faster, and 5 seconds at 10 m/s or faster. Unknown speed uses the 10 second slow-moving limit.
 
 The main scanner UI visualizes the usable-fix state. GNSS quality is a continuous `0..1` usability score based on freshness, horizontal accuracy, and HDOP. The score decays smoothly as a fix ages. When no usable fix remains, the GNSS segment should read as missing/invalid location rather than merely low quality: the current prototype uses zero quality, explanatory text such as `Fix too old`, `Too imprecise`, or `Weak fix`, and a hatched GNSS panel.
 

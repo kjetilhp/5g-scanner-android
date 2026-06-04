@@ -44,7 +44,7 @@
             </intent-filter>
         </receiver>
         <provider
-            android:name=".storage.CoverageLogFileProvider"
+            android:name=".storage.CoverageExportFileProvider"
             android:authorities="${applicationId}.coverage-exports"
             android:exported="false"
             android:grantUriPermissions="true" />

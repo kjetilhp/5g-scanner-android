@@ -31,7 +31,7 @@ interface CoverageSampleDao {
         ORDER BY captured_date_utc DESC
         """,
     )
-    fun logDays(): List<CoverageLogDay>
+    fun recordedCoverageDays(): List<RecordedCoverageDay>
 
     @Query(
         """
@@ -76,7 +76,7 @@ interface CoverageSampleDao {
     fun deleteAll(): Int
 }
 
-data class CoverageLogDay(
+data class RecordedCoverageDay(
     val dateUtc: String,
     val sampleCount: Int,
     val sizeBytes: Long,

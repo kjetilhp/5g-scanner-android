@@ -2,7 +2,7 @@
 
 Android/Kotlin app for building a real 5G/LTE coverage data set from Android phones.
 
-5G Scanner is meant to be installed, granted consent, and then left to work quietly in the background. While scanning is enabled, it records mobile signal quality, location, time, and network context so coverage can be mapped over time in the areas where participants actually work and travel.
+5G Scanner is meant to be installed, granted consent, and then left to work quietly in the background. While scanning is running, it records mobile signal quality, location, time, and network context so coverage can be mapped over time in the areas where participants actually work and travel.
 
 The app focuses on 5G coverage, while also collecting LTE data when that helps explain the real mobile experience. It only collects data; it is not a navigation app, speed test, or network optimization tool.
 
@@ -10,7 +10,7 @@ The app focuses on 5G coverage, while also collecting LTE data when that helps e
 
 Planning and project setup plus a simulator-friendly Android scanner prototype.
 
-The product direction is a consent-led background coverage collector. Most users should only need to grant consent, keep the app installed, and pause scanning when they are off duty or want to save battery. Engineers can inspect recorded samples and tune settings, but the app should stay simple for voluntary crowdsourced participation.
+The product direction is a consent-led background coverage collector. Most users should only need to grant consent, keep the app installed, and stop scanning when they are off duty or want to save battery. Engineers can inspect recorded samples and tune settings, but the app should stay simple for voluntary crowdsourced participation.
 
 Storage is local-first, with reporting controlled by the app's reporting setting.
 
@@ -73,11 +73,11 @@ The emulator build currently uses mock telemetry. It supports:
 - Grant app-level consent
 - Automatic mock scanning after consent through a foreground scanner service with mock radio and mock GNSS sources
 - Accepted samples persisted in a local Room/SQLite database with upload bookkeeping fields
-- Recorded coverage data view backed by the database, with CSV exports generated into temporary cache files
+- Recorded coverage data inspector backed by the database, with CSV exports generated into temporary cache files
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
 - Separate settings screen for location mode, reporting, recorded coverage data, and About details
-- Recorded coverage data placeholder that will become a database inspector
+- Scanner state model: stopped, running, or error
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
@@ -125,7 +125,7 @@ RadioTelemetrySource + GnssTelemetrySource
 
 Mock radio/GNSS sources are active for emulator development. Android radio/GNSS source classes exist as placeholders for the future public API collectors.
 
-Active scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
+Running scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
 
 The About screen includes a small Developer section with a `Mock telemetry` toggle. It defaults to enabled so emulator development keeps using simulator-friendly radio/GNSS samples. Emulators always force mock telemetry even if the saved toggle is off. Turning it off on a physical device routes the scanner through the Android source classes; those are still placeholders until the real public API collectors are implemented. The main scanner screen shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
@@ -174,7 +174,7 @@ Core first-version assumptions:
 
 - Scanning requires app-level consent and Android permission grants
 - The normal experience is consent once, then let scanning run in the background
-- Participation can pause by stopping scanning and can stop by uninstalling the app
+- Participation can pause by stopping scanning and can stop entirely by uninstalling the app
 - The main UI should expose a clear scanning on/off control for off hours, battery saving, or user choice
 - The prototype samples on a fixed internal cadence; settings should avoid scanner controls that do not change real collection behavior
 - Settings should include location behavior, reporting, recorded coverage data, and About details

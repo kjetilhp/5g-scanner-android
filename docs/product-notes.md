@@ -12,7 +12,7 @@ The app should only scan when all of these are true:
 
 - The user has granted app-level consent
 - The required Android permissions are granted
-- Scanning is not stopped
+- Scanning is not stopped by the user
 
 The first version should store samples locally first. Reporting is controlled by a small reporting-mode setting and must remain consent-gated, transparent, and easy to explain.
 
@@ -28,7 +28,7 @@ The first-run flow should explain in plain language:
 - Why it is collected: voluntary crowdsourced coverage mapping
 - Where it goes: local device storage first, with periodic reporting according to the user's reporting setting
 - How reporting is controlled: Hourly, Daily, Continuous, Manual, and Send now
-- How the user can pause scanning for off hours or battery conservation, and how participation can stop
+- How the user can stop scanning for off hours or battery conservation, and how participation can stop entirely
 
 Consent should be tracked by the app separately from Android OS permission grants.
 
@@ -36,8 +36,8 @@ Consent should be tracked by the app separately from Android OS permission grant
 
 The main screen should be quiet and practical:
 
-- Large scanning on/off control
-- Current state: idle, scanning, paused, missing permission, or consent required
+- Large start/stop scanning control
+- Current state: stopped, running, error, or consent required
 - Last sample time
 - Samples collected in the current session
 - Local recorded-data status
@@ -49,7 +49,7 @@ The user should never need to understand radio engineering details to know wheth
 
 Settings should favor a small number of understandable controls:
 
-- Pause/resume scanning, including future pause-until support
+- Start/stop scanning, with future pause-until support if it proves useful
 - Location/GNSS behavior
 - Reporting mode and last sent status
 - Recorded coverage data inspector with CSV export
@@ -60,17 +60,15 @@ Sampling frequency should not be user-configurable until changing it would relia
 
 ## Scanner State
 
-Prefer one effective scanner state derived from consent, permissions, user toggle, and pause settings.
+Prefer one effective scanner state derived from consent, permissions, user intent, and environment guards.
 
 Example states:
 
 ```text
 ConsentRequired
 PermissionRequired
-Idle
-Scanning
-PausedUntil(timestamp)
-PausedManually
+Stopped
+Running
 Error(message)
 ```
 

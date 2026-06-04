@@ -7,8 +7,8 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Callable
 
-class CoverageLogStore(private val context: Context) {
-    data class LogStats(
+class CoverageDataStore(private val context: Context) {
+    data class RecordedDataStats(
         val sampleCount: Int,
         val dayCount: Int,
         val estimatedBytes: Long,
@@ -34,9 +34,9 @@ class CoverageLogStore(private val context: Context) {
 
     fun displayDirectory(): String = "local app database"
 
-    fun stats(): LogStats = dbQuery {
+    fun stats(): RecordedDataStats = dbQuery {
         val dao = CoverageDatabaseProvider.database(context).coverageSampleDao()
-        LogStats(
+        RecordedDataStats(
             sampleCount = dao.count(),
             dayCount = dao.dayCount(),
             estimatedBytes = dao.encodedSizeBytes(),
@@ -74,9 +74,9 @@ class CoverageLogStore(private val context: Context) {
     }
 
     fun exportUri(file: File): Uri =
-        CoverageLogFileProvider.exportUriFor(context, file)
+        CoverageExportFileProvider.exportUriFor(context, file)
 
-    fun deleteAllLogs(): Int = dbQuery {
+    fun deleteAllSamples(): Int = dbQuery {
         CoverageDatabaseProvider.database(context).coverageSampleDao().deleteAll()
     }
 

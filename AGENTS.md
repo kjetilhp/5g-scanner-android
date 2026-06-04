@@ -44,7 +44,7 @@ Expect to use:
 - Android Gradle Plugin
 - Android telephony APIs
 - Location APIs
-- A foreground service for active logging
+- A foreground service for running scanning
 - Runtime permission handling
 - Room/SQLite local persistence with internal JSONL/reporting compatibility and user-facing CSV export
 
@@ -67,9 +67,9 @@ Temporary errors such as missing runtime permission, location disabled, flight m
 
 Active scanning should run in a foreground service with a visible notification. The scanner state model is stopped, running, or error. Running means active sample production; error means scanning is still desired but samples cannot currently be produced. The UI should mirror the same state and keep the reason/action guard visible.
 
-Initial versions should assume local-first logging. Reporting/upload behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
+Initial versions should assume local-first sample persistence. Reporting behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
-The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources. Accepted samples are written to a local Room/SQLite database with upload bookkeeping fields. JSONL is internal to reporting/compatibility and must not be presented as the normal user export format. CSV is generated on demand for user-facing export. Settings includes reporting controls, a recorded coverage data view that is currently a database-inspector placeholder with CSV export actions, and deleting all local coverage samples after confirmation.
+The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources. Accepted samples are written to a local Room/SQLite database with upload bookkeeping fields. JSONL is internal to reporting/compatibility and must not be presented as the normal user export format. CSV is generated on demand for user-facing export. Settings includes reporting controls, a simple recorded coverage data inspector with CSV export actions, and deleting all local coverage samples after confirmation.
 
 Telemetry source selection goes through `TelemetrySourceFactory`. The About screen includes a Developer `Mock telemetry` toggle that defaults on for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. Turning it off on a physical device should route through Android collector classes; keep those classes behind the same `RadioTelemetrySource` and `GnssTelemetrySource` interfaces. The scanner UI should indicate active mock telemetry with a subtle `MOCK` badge.
 
@@ -82,7 +82,7 @@ Keep the first usable UI small:
 - A single stop/start control on the main scanner screen
 - Separate settings screen for less frequent controls
 
-Use clear, human language around what is collected, why it is collected, where it is stored, and how participation can pause or stop. The tone should support a normal participant who is helping build a coverage map by carrying their phone, not someone debugging radio metrics. Avoid dark patterns around consent, permissions, scanning state, deletion, or later upload behavior.
+Use clear, human language around what is collected, why it is collected, where it is stored, and how participation can pause or stop. The tone should support a normal participant who is helping build a coverage map by carrying their phone, not someone debugging radio metrics. Avoid dark patterns around consent, permissions, scanning state, deletion, or later reporting behavior.
 
 When adding settings, keep the default path simple. Favor controls that support the crowdsourcing participant, such as pause/resume, pause until a date/time, battery-aware location behavior, reporting visibility, and local data deletion. Keep engineer-oriented controls discoverable but secondary.
 
@@ -106,7 +106,7 @@ When adding Android code, keep modules separated roughly as:
 - `telemetry/` for Android connectivity/location collectors
 - `storage/` for database persistence, reporting state, and CSV export
 - `docs/` for schema and architecture notes
-- `samples/` for copied or minimized example logs
+- `samples/` for copied or minimized example coverage samples
 - `scripts/` for maintenance scripts such as icon generation
 
 App icons are based on `assets/icon/source.svg`. Android launcher icons use adaptive icon XML plus `app/src/main/res/drawable/ic_launcher_foreground.xml`; run `npm run icons` after changing the source to refresh generated favicon files.

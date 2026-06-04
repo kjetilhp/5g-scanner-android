@@ -1,6 +1,6 @@
 # Output Contract
 
-The Android app should emit logs compatible with the Node/TypeScript scanner.
+The Android app should record coverage samples compatible with the Node/TypeScript scanner.
 
 The reference project is expected at:
 
@@ -115,4 +115,4 @@ sinr: number
 rssi?: number
 ```
 
-Android devices may omit some signal metrics. When the app implementation begins, decide whether Android-specific partial readings require a compatible extension or a stricter filtering step before log emission.
+Android devices may omit some signal metrics. When the app implementation begins, decide whether Android-specific partial readings require a compatible extension or a stricter filtering step before sample persistence.

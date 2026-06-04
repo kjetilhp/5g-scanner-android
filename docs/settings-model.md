@@ -8,30 +8,26 @@ Prefer a small set of choices over free-form expert controls in the first versio
 
 ## Suggested Settings
 
-### Scanning Toggle
+### Scanner Stop State
 
 ```text
-scannerEnabled: Boolean
+scannerStopped: Boolean
 ```
 
-The main screen owns this control. Turning it off should stop active scanner work.
+The main screen owns this control. `false` means the user wants scanning to run when consent, permissions, and device state allow it. `true` means the user has stopped scanning.
 
-### Pause Mode
+### Future Pause Until
 
-Use one pause model instead of separate temporary-disable concepts.
+Do not add a second manual pause concept beside the scanner stop state. If pause-until is added later, model it as a timed stop/resume helper for the same user intent.
 
 ```text
-PauseMode:
-  None
-  Manual
-  Until(timestamp)
+pauseUntil: Instant?
 ```
 
 Examples:
 
-- No pause: scanner may run if all other requirements are met
-- Manual pause: disabled until the user resumes
-- Pause until: disabled until a chosen date/time
+- No pause-until: scanner may run if all other requirements are met and `scannerStopped == false`
+- Pause until: scanner remains stopped until a chosen date/time, then resumes scanning if the user intent still allows it
 
 ### Sampling Cadence
 
@@ -75,16 +71,16 @@ ReportingMode:
 
 Examples:
 
-- Hourly: upload saved samples about once per hour for normal crowdsourcing while early reporting is being validated
-- Daily: upload saved samples about once per day for lower-impact crowdsourcing
-- Continuous: upload new samples soon after they are collected for developers, engineers, and live field testing
+- Hourly: report saved samples about once per hour for normal crowdsourcing while early reporting is being validated
+- Daily: report saved samples about once per day for lower-impact crowdsourcing
+- Continuous: report new samples soon after they are collected for developers, engineers, and live field testing
 - Manual: keep samples on the device until the user exports them, shares them, or uses a manual send action
 
-The scanner should still write locally first. Upload failures must leave data queued locally for later retry or manual export.
+The scanner should still write locally first. Reporting failures must leave data queued locally for later retry or manual export.
 
 Hourly is the initial default so early server-side reporting can be validated with reasonably fresh data while keeping ordinary crowdsourcing impact controlled. Daily may become the default later if collected data shows that a lower upload frequency is sufficient. Continuous is primarily for live field testing and should not be presented as the normal user path.
 
-Settings should always show Last sent as supporting text inside the reporting mode row. Last sent is app-wide reporting state and updates only after a successful network upload or prototype no-op upload succeeds.
+Settings should always show Last sent as supporting text inside the reporting mode row. Last sent is app-wide reporting state and updates only after successful reporting or the prototype no-op reporting path succeeds.
 
 When Manual, Daily, or Hourly is selected, settings should also show a Send now action at the bottom of the reporting section. It is a one-time manual upload action and should not change the automatic reporting mode. Continuous does not show Send now because it reports when new measurements are collected.
 
@@ -108,8 +104,8 @@ Scanner work can run only if:
 ```text
 consent == Granted
 requiredPermissions == Granted
-scannerEnabled == true
-pauseMode == None or pause-until time has passed
+scannerStopped == false
+pauseUntil == null or pauseUntil has passed
 ```
 
 The app should derive one effective state from these inputs and show that state in the UI.

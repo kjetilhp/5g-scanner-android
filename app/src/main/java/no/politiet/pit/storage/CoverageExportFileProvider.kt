@@ -11,7 +11,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileNotFoundException
 
-class CoverageLogFileProvider : ContentProvider() {
+class CoverageExportFileProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
@@ -20,7 +20,7 @@ class CoverageLogFileProvider : ContentProvider() {
         }
         val file = fileForUri(uri)
         if (!file.isFile) {
-            throw FileNotFoundException("Coverage log not found: $uri")
+            throw FileNotFoundException("Coverage export not found: $uri")
         }
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     }

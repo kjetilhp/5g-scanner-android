@@ -27,7 +27,7 @@
     <string name="serving_cell_unavailable">Serving cell unavailable</string>
     <string name="measurement_help_action">Explain measurements</string>
     <string name="measurement_help_title">Signal measurements</string>
-    <string name="measurement_help_body">RSRP (dBm)\nReceived signal power. Less negative is better.\n\nRSRQ (dB)\nSignal quality compared with interference and load. Less negative is better.\n\nSINR (dB)\nSignal-to-noise ratio. Higher is better.\n\nGNSS\nThis value drops as the latest location fix  becomes less useful for matching the signal sample. A smaller ± accuracy value and a newer fix are better.</string>
+    <string name="measurement_help_body">RSRP (dBm)\nReceived signal power. Less negative is better.\n\nRSRQ (dB)\nSignal quality compared with interference and load. Less negative is better.\n\nSINR (dB)\nSignal-to-noise ratio. Higher is better.\n\nGNSS\nThis value drops as the latest location fix becomes less useful for matching the signal sample. A smaller accuracy value and a newer fix are better.</string>
     <string name="stop_scanning">Stop scanning</string>
     <string name="start_scanning">Start scanning</string>
     <string name="open_settings">Settings</string>
@@ -36,7 +36,7 @@
     <string name="back_to_settings">Back to settings</string>
     <string name="settings_section_location">Location</string>
     <string name="settings_section_reporting">Reporting</string>
-    <string name="settings_section_logs">Coverage data</string>
+    <string name="settings_section_coverage_data">Coverage data</string>
     <string name="settings_section_about">About</string>
     <string name="settings_section_developer">Developer</string>
     <string name="setting_about_title">About</string>
@@ -63,9 +63,9 @@
     <string name="setting_send_now_summary">Send queued coverage samples stored on this device.</string>
     <string name="setting_send_now_success_message">No-op send succeeded. Last sent has been updated.</string>
     <string name="setting_send_now_failed_message">No-op send failed. Check the network connection and try again.</string>
-    <string name="setting_view_logs_title">Recorded coverage data</string>
-    <string name="log_files_empty_title">No recorded samples</string>
-    <string name="log_files_empty_summary">Samples will appear here after scanning records coverage data.</string>
+    <string name="setting_recorded_coverage_data_title">Recorded coverage data</string>
+    <string name="coverage_data_empty_title">No recorded samples</string>
+    <string name="coverage_data_empty_summary">Samples will appear here after scanning records coverage data.</string>
     <string name="coverage_data_inspector_title">Database inspector</string>
     <string name="coverage_data_inspector_summary">Recent recorded samples from the local database.</string>
     <string name="coverage_data_inspector_stats">%1$d samples across %2$d days. Estimated stored size: %3$s.</string>
@@ -76,11 +76,11 @@
     <string name="coverage_export_csv_summary">Create a CSV file from recorded coverage samples.</string>
     <string name="coverage_export_recent_action">Recent 1,000 samples</string>
     <string name="coverage_export_all_action">All local samples</string>
-    <string name="delete_all_logs_title">Delete all</string>
-    <string name="delete_all_logs_summary">Delete every recorded coverage sample stored on this device.</string>
-    <string name="delete_all_logs_confirm_message">Delete all recorded coverage samples from this device? This cannot be undone.</string>
-    <string name="delete_all_logs_confirm_action">Delete</string>
-    <plurals name="log_files_summary">
+    <string name="delete_all_coverage_data_title">Delete all</string>
+    <string name="delete_all_coverage_data_summary">Delete every recorded coverage sample stored on this device.</string>
+    <string name="delete_all_coverage_data_confirm_message">Delete all recorded coverage samples from this device? This cannot be undone.</string>
+    <string name="delete_all_coverage_data_confirm_action">Delete</string>
+    <plurals name="coverage_data_summary">
         <item quantity="one">%1$d sample, %2$d day</item>
         <item quantity="other">%1$d samples, %2$d days</item>
     </plurals>

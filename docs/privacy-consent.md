@@ -8,7 +8,7 @@ The app should be built around informed, reversible participation. The user is h
 - Android permissions must be requested only with context
 - Revoking consent must stop scanning
 - Permission revocation must be handled gracefully
-- Reporting/upload behavior must not be added or changed silently
+- Reporting behavior must not be added or changed silently
 - Local coverage samples should be deletable by the user
 
 This document is product guidance, not legal advice.
@@ -35,7 +35,7 @@ Granted(version, timestamp)
 Revoked(timestamp)
 ```
 
-Keep a consent text or privacy notice version from the beginning, even if the first version is just `1`. If collection, retention, or upload behavior changes later, users can be asked to review and re-consent.
+Keep a consent text or privacy notice version from the beginning, even if the first version is just `1`. If collection, retention, or reporting behavior changes later, users can be asked to review and re-consent.
 
 ## Data Collection Scope
 
@@ -65,7 +65,7 @@ Initial behavior:
 - Allow local data deletion
 - Allow user-facing CSV export/share
 
-Material reporting/upload changes should require:
+Material reporting changes should require:
 
 - Updated privacy documentation
 - Explicit user-facing consent
@@ -83,7 +83,7 @@ When consent is revoked:
 
 When Android permissions are revoked:
 
-- Stop or block scanner work that needs those permissions
+- Stop scanner work or put scanning into error when those permissions are required
 - Show a clear missing-permission state
 - Keep app-level consent unchanged unless the user revokes it
 

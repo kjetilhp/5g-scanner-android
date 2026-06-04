@@ -58,7 +58,7 @@ import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
 import no.politiet.pit.reporting.ReportingScheduler
 import no.politiet.pit.storage.AppSettingsStore
-import no.politiet.pit.storage.CoverageLogStore
+import no.politiet.pit.storage.CoverageDataStore
 import no.politiet.pit.telemetry.MetricKind
 import no.politiet.pit.telemetry.MetricQuality
 import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
@@ -104,7 +104,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
     private var scannerStateReceiverRegistered = false
-    private lateinit var coverageLogStore: CoverageLogStore
+    private lateinit var coverageDataStore: CoverageDataStore
     private lateinit var settingsStore: AppSettingsStore
 
     private val gnssAgeTick = object : Runnable {
@@ -180,7 +180,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        coverageLogStore = CoverageLogStore(this)
+        coverageDataStore = CoverageDataStore(this)
         settingsStore = AppSettingsStore(this)
         loadState()
         syncScannerStateFromService(animateBars = false)
@@ -265,7 +265,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun handleBackNavigation(): Boolean {
         return when {
-            showingSettings && settingsDestination == SettingsDestination.LogList -> {
+            showingSettings && settingsDestination == SettingsDestination.CoverageData -> {
                 Log.d(TAG, "Back pressed: recorded data -> settings")
                 settingsDestination = SettingsDestination.Main
                 render(ScreenTransition.Back)
@@ -311,7 +311,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             !consentGranted -> createConsentView()
             showingSettings -> when (settingsDestination) {
                 SettingsDestination.Main -> createSettingsView()
-                SettingsDestination.LogList -> createLogListView()
+                SettingsDestination.CoverageData -> createCoverageDataView()
                 SettingsDestination.About -> createAboutView()
             }
             else -> createScannerView()
@@ -496,12 +496,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             },
         )
         reportingRows.add(settingsPreferenceRow(
-            title = getString(R.string.setting_view_logs_title),
-            summary = logStatsSummary(),
+            title = getString(R.string.setting_recorded_coverage_data_title),
+            summary = coverageDataSummary(),
             value = "",
         ) {
             Log.d(TAG, "Opening recorded coverage data")
-            settingsDestination = SettingsDestination.LogList
+            settingsDestination = SettingsDestination.CoverageData
             render(ScreenTransition.Forward)
         })
         if (reportingMode != ReportingMode.Continuous) {
@@ -514,10 +514,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             })
         }
         reportingRows.add(settingsDestructiveActionRow(
-            title = getString(R.string.delete_all_logs_title),
-            summary = getString(R.string.delete_all_logs_summary),
+            title = getString(R.string.delete_all_coverage_data_title),
+            summary = getString(R.string.delete_all_coverage_data_summary),
         ) {
-            confirmDeleteAllLogs()
+            confirmDeleteAllSamples()
         })
         content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
         content.addView(settingsGroup(*reportingRows.toTypedArray()))
@@ -555,11 +555,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         return root
     }
 
-    private fun createLogListView(): View {
+    private fun createCoverageDataView(): View {
         clearScannerViews()
-        val stats = coverageLogStore.stats()
+        val stats = coverageDataStore.stats()
         val recentSamples = if (stats.sampleCount > 0) {
-            coverageLogStore.recentInspectionSamples(INSPECTOR_SAMPLE_LIMIT)
+            coverageDataStore.recentInspectionSamples(INSPECTOR_SAMPLE_LIMIT)
         } else {
             emptyList()
         }
@@ -569,16 +569,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             setPadding(dp(16), dp(8), dp(16), dp(32))
         }
 
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_logs)))
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_coverage_data)))
         content.addView(settingsGroup(
             settingsInfoRow(
                 title = if (stats.sampleCount == 0) {
-                    getString(R.string.log_files_empty_title)
+                    getString(R.string.coverage_data_empty_title)
                 } else {
                     getString(R.string.coverage_data_inspector_title)
                 },
                 summary = if (stats.sampleCount == 0) {
-                    getString(R.string.log_files_empty_summary)
+                    getString(R.string.coverage_data_empty_summary)
                 } else {
                     getString(
                         R.string.coverage_data_inspector_stats,
@@ -617,7 +617,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         return settingsScreen(
-            title = getString(R.string.setting_view_logs_title),
+            title = getString(R.string.setting_recorded_coverage_data_title),
             backDescription = getString(R.string.back_to_settings),
             onBack = {
                 settingsDestination = SettingsDestination.Main
@@ -627,20 +627,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         )
     }
 
-    private fun confirmDeleteAllLogs() {
+    private fun confirmDeleteAllSamples() {
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.delete_all_logs_title))
-            .setMessage(getString(R.string.delete_all_logs_confirm_message))
+            .setTitle(getString(R.string.delete_all_coverage_data_title))
+            .setMessage(getString(R.string.delete_all_coverage_data_confirm_message))
             .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(getString(R.string.delete_all_logs_confirm_action)) { _, _ ->
-                val deletedSamples = coverageLogStore.deleteAllLogs()
+            .setPositiveButton(getString(R.string.delete_all_coverage_data_confirm_action)) { _, _ ->
+                val deletedSamples = coverageDataStore.deleteAllSamples()
                 Log.d(TAG, "Deleted local coverage samples: samples=$deletedSamples")
                 render()
             }
             .show()
     }
 
-    private fun inspectionSampleTitle(sample: CoverageLogStore.InspectionSample): String =
+    private fun inspectionSampleTitle(sample: CoverageDataStore.InspectionSample): String =
         buildString {
             append(dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis)))
             append(" - ")
@@ -648,7 +648,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             if (sample.mockTelemetry) append(" - MOCK")
         }
 
-    private fun inspectionSampleSummary(sample: CoverageLogStore.InspectionSample): String {
+    private fun inspectionSampleSummary(sample: CoverageDataStore.InspectionSample): String {
         val signal = listOfNotNull(
             sample.rsrp.takeIf { it.isNotBlank() }?.let { "RSRP $it" },
             sample.sinr.takeIf { it.isNotBlank() }?.let { "SINR $it" },
@@ -661,7 +661,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         return "$signal\n$location\n${sample.uploadStatus}"
     }
 
-    private fun showInspectionSampleDetails(sample: CoverageLogStore.InspectionSample) {
+    private fun showInspectionSampleDetails(sample: CoverageDataStore.InspectionSample) {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.coverage_sample_detail_title))
             .setMessage(inspectionSampleDetailText(sample))
@@ -669,7 +669,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .show()
     }
 
-    private fun inspectionSampleDetailText(sample: CoverageLogStore.InspectionSample): String =
+    private fun inspectionSampleDetailText(sample: CoverageDataStore.InspectionSample): String =
         buildString {
             appendLine(getString(R.string.coverage_sample_detail_summary, sample.id))
             appendLine("Captured: ${dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis))}")
@@ -697,15 +697,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ),
             ) { _, which ->
                 when (which) {
-                    0 -> shareCoverageCsv(coverageLogStore.exportRecentCsv(RECENT_EXPORT_SAMPLE_LIMIT))
-                    1 -> shareCoverageCsv(coverageLogStore.exportAllCsv())
+                    0 -> shareCoverageCsv(coverageDataStore.exportRecentCsv(RECENT_EXPORT_SAMPLE_LIMIT))
+                    1 -> shareCoverageCsv(coverageDataStore.exportAllCsv())
                 }
             }
             .show()
     }
 
     private fun shareCoverageCsv(csvFile: java.io.File) {
-        val uri = coverageLogStore.exportUri(csvFile)
+        val uri = coverageDataStore.exportUri(csvFile)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
             putExtra(Intent.EXTRA_STREAM, uri)
@@ -1136,10 +1136,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
         )
 
-    private fun logStatsSummary(): String {
-        val stats = coverageLogStore.stats()
+    private fun coverageDataSummary(): String {
+        val stats = coverageDataStore.stats()
         return resources.getQuantityString(
-            R.plurals.log_files_summary,
+            R.plurals.coverage_data_summary,
             stats.sampleCount,
             stats.sampleCount,
             stats.dayCount,
@@ -1192,7 +1192,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         Log.i(
             TAG,
-            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageLogStore.displayDirectory()}",
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
         )
     }
 
@@ -2721,7 +2721,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private enum class SettingsDestination {
         Main,
-        LogList,
+        CoverageData,
         About,
     }
 
