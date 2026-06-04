@@ -2,7 +2,11 @@
 
 ## Project Intent
 
-An Android/Kotlin 5G/LTE coverage scanner app. The app collecta phone connectivity, cellular radio, and location data after user-granted permissions, then emit logs compatible with the existing Node/TypeScript scanner.
+An Android/Kotlin 5G/LTE coverage scanner app. The app collects phone connectivity, cellular radio, and location data after user-granted consent and permissions, then records coverage samples compatible with the existing Node/TypeScript scanner contract.
+
+The product purpose is to build a real coverage data set that evolves over time from the areas participants actually work and travel. The app only collects coverage data. It is not a speed test, navigation app, or network optimization tool.
+
+The default user is a voluntary crowdsourcing participant, not a power user. Employees, engineers, and possibly public participants should be able to install the app, grant consent, and let it work quietly in the background. Normal users may pause scanning for off hours or battery conservation, but should rarely need settings. Engineer workflows can exist, but must not make the main product feel like an expert-only tool.
 
 The reference scanner lives at:
 
@@ -18,7 +22,7 @@ Do not embed or port the Node.js scanner wholesale into Android unless explicitl
 
 Keep Android API usage at the edges. Domain models, encoders, and validation should be plain Kotlin where possible.
 
-The first Android app experience should be simple and consent-led: users voluntarily participate in crowdsourced coverage mapping and can stop scanning temporarily. Consent must be a blocking full-screen gate; scanner controls and settings should not be shown until app-level consent is granted. In the current prototype, stopping participation after consent is handled by stopping scanning or uninstalling the app rather than an in-app revoke control.
+The first Android app experience should be simple and consent-led: users voluntarily participate in crowdsourced coverage mapping and can pause scanning temporarily. Consent must be a blocking full-screen gate; scanner controls and settings should not be shown until app-level consent is granted. In the current prototype, stopping participation after consent is handled by stopping scanning or uninstalling the app rather than an in-app revoke control.
 
 ## Reference Contract
 
@@ -42,9 +46,9 @@ Expect to use:
 - Location APIs
 - A foreground service for active logging
 - Runtime permission handling
-- JSONL file logging with user-facing CSV preview/share export
+- Room/SQLite local persistence with internal JSONL/reporting compatibility and user-facing CSV export
 
-The initial app is intentionally minimal: one native Android Activity with no Compose, AndroidX, or third-party dependencies. Add dependencies only when they pull real weight for the scanner, consent flow, or app ergonomics.
+The initial app is intentionally minimal: one native Android Activity with no Compose and only dependencies that pull real weight for the scanner, consent flow, persistence, or app ergonomics.
 
 The Android app should compile and target Android 16/API 36, with Android 10/API 29 as the minimum supported version for the intended modern 5G-capable device fleet.
 
@@ -65,7 +69,7 @@ Active scanning should run in a foreground service with a visible notification. 
 
 Initial versions should assume local-first logging. Reporting/upload behavior must stay consent-gated, clearly explained, and controlled by the reporting settings.
 
-The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources and writes accepted samples to daily JSONL coverage logs under `Documents/Ask/` on shared storage. Settings includes reporting controls, a coverage logs view for listing files, in-app CSV preview/share export, and deleting all local coverage logs after confirmation.
+The current prototype uses a foreground `ScannerService` with mock radio/GNSS sources. Accepted samples are written to a local Room/SQLite database with upload bookkeeping fields. JSONL is internal to reporting/compatibility and must not be presented as the normal user export format. CSV is generated on demand for user-facing export. Settings includes reporting controls, a recorded coverage data view that is currently a database-inspector placeholder with CSV export actions, and deleting all local coverage samples after confirmation.
 
 Telemetry source selection goes through `TelemetrySourceFactory`. The About screen includes a Developer `Mock telemetry` toggle that defaults on for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. Turning it off on a physical device should route through Android collector classes; keep those classes behind the same `RadioTelemetrySource` and `GnssTelemetrySource` interfaces. The scanner UI should indicate active mock telemetry with a subtle `MOCK` badge.
 
@@ -78,7 +82,9 @@ Keep the first usable UI small:
 - A single stop/start control on the main scanner screen
 - Separate settings screen for less frequent controls
 
-Use clear language around what is collected, why it is collected, where it is stored, and how participation can stop. Avoid dark patterns around consent, permissions, scanning state, deletion, or later upload behavior.
+Use clear, human language around what is collected, why it is collected, where it is stored, and how participation can pause or stop. The tone should support a normal participant who is helping build a coverage map by carrying their phone, not someone debugging radio metrics. Avoid dark patterns around consent, permissions, scanning state, deletion, or later upload behavior.
+
+When adding settings, keep the default path simple. Favor controls that support the crowdsourcing participant, such as pause/resume, pause until a date/time, battery-aware location behavior, reporting visibility, and local data deletion. Keep engineer-oriented controls discoverable but secondary.
 
 Relevant planning docs:
 
@@ -98,7 +104,7 @@ When adding Android code, keep modules separated roughly as:
 - `app/` for UI and app wiring
 - `core/` for domain models and JSONL encoding
 - `telemetry/` for Android connectivity/location collectors
-- `storage/` for log persistence/export
+- `storage/` for database persistence, reporting state, and CSV export
 - `docs/` for schema and architecture notes
 - `samples/` for copied or minimized example logs
 - `scripts/` for maintenance scripts such as icon generation

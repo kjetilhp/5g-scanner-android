@@ -1,14 +1,18 @@
 # 5G Scanner Android
 
-Android/Kotlin companion app for the 5G Scanner project.
+Android/Kotlin app for building a real 5G/LTE coverage data set from Android phones.
 
-The goal is to turn an Android phone into a 5G/LTE coverage sensor: after the user grants permissions, the app will sample location, connectivity, and cellular radio data, then write logs compatible with the existing Node/TypeScript scanner.
+5G Scanner is meant to be installed, granted consent, and then left to work quietly in the background. While scanning is enabled, it records mobile signal quality, location, time, and network context so coverage can be mapped over time in the areas where participants actually work and travel.
+
+The app focuses on 5G coverage, while also collecting LTE data when that helps explain the real mobile experience. It only collects data; it is not a navigation app, speed test, or network optimization tool.
 
 ## Current Status
 
 Planning and project setup plus a simulator-friendly Android scanner prototype.
 
-The current product direction is a small, consent-led scanner app: the user voluntarily participates in scanning, can stop and start it, and can stop participating by uninstalling the app. Logging is local-first, with reporting controlled by the app's reporting setting.
+The product direction is a consent-led background coverage collector. Most users should only need to grant consent, keep the app installed, and pause scanning when they are off duty or want to save battery. Engineers can inspect recorded samples and tune settings, but the app should stay simple for voluntary crowdsourced participation.
+
+Storage is local-first, with reporting controlled by the app's reporting setting.
 
 ## Reference Project
 
@@ -36,9 +40,9 @@ external/node-scanner/data/*.jsonl
 5g-scanner-android/
   assets/icon/          Canonical app icon SVG and generated favicon assets
   app/                  Android application module
-  core/                 Plain Kotlin domain models and JSONL encoding
+  core/                 Plain Kotlin domain models and internal sample encoding
   telemetry/            Android location/connectivity/cellular collectors
-  storage/              Log persistence and export
+  storage/              Database persistence, reporting state, and CSV export
   scripts/              Maintenance scripts, including icon generation
   docs/                 Architecture notes and output contract
   external/
@@ -56,10 +60,10 @@ settings.gradle.kts
 build.gradle.kts
 app/build.gradle.kts
 app/src/main/AndroidManifest.xml
-app/src/main/java/no/politiet/pit/MainActivity.kt
+app/src/main/java/app/fivegscanner/MainActivity.kt
 ```
 
-It uses a single native Android `Activity` and avoids Compose, AndroidX, and third-party dependencies for now. Android Studio can open the project and sync Gradle.
+It uses a single native Android `Activity` and avoids Compose. AndroidX Room is included for local sample persistence; CSV is the user-facing export format. Android Studio can open the project and sync Gradle.
 
 The app compiles and targets Android 16/API 36. The minimum supported Android version is Android 10/API 29, matching the first public Android API level with 5G NR telephony classes and the intended modern 5G device fleet.
 
@@ -68,11 +72,12 @@ The emulator build currently uses mock telemetry. It supports:
 - Blocking first-run consent before scanner controls are shown
 - Grant app-level consent
 - Automatic mock scanning after consent through a foreground scanner service with mock radio and mock GNSS sources
-- Daily JSONL log files written under `Documents/Ask/` on shared storage
+- Accepted samples persisted in a local Room/SQLite database with upload bookkeeping fields
+- Recorded coverage data view backed by the database, with CSV exports generated into temporary cache files
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
-- Separate settings screen for location mode, reporting, coverage logs, and About details
-- Coverage log CSV preview and Android Sharesheet export
+- Separate settings screen for location mode, reporting, recorded coverage data, and About details
+- Recorded coverage data placeholder that will become a database inspector
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
 
@@ -95,7 +100,7 @@ npm run icons
 
 The script uses the pinned `@resvg/resvg-js` dev dependency for deterministic SVG rasterization. Generated favicon assets are written to `assets/icon/generated/`.
 
-## Output Format
+## Internal Reporting Contract
 
 The first target format is append-only JSON Lines:
 
@@ -103,15 +108,11 @@ The first target format is append-only JSON Lines:
 one CoverageSample JSON object per line
 ```
 
-The Android prototype currently writes mock samples to one file per UTC day:
-
-```text
-Documents/Ask/coverage-YYYY-MM-DD.jsonl
-```
+The Android prototype stores accepted samples in Room/SQLite. JSONL is still the internal compatibility contract for reporting and tests, but it is not the user-facing export format and is not written as daily files.
 
 See [docs/output-contract.md](docs/output-contract.md) for the current contract notes.
 
-Coverage logs remain stored internally as JSONL. The app generates temporary CSV exports for on-device preview and sharing with other Android apps.
+Accepted coverage samples are stored in a local Room/SQLite database. The app generates CSV from selected database rows for user-facing export through the Android Sharesheet. JSONL remains internal to reporting/debug workflows.
 
 The prototype now routes mock collection through the same shape planned for real scanning:
 
@@ -119,7 +120,7 @@ The prototype now routes mock collection through the same shape planned for real
 RadioTelemetrySource + GnssTelemetrySource
   -> CoverageSampleAssembler
   -> CoverageSampleJsonEncoder
-  -> CoverageLogStore
+  -> CoverageDatabase
 ```
 
 Mock radio/GNSS sources are active for emulator development. Android radio/GNSS source classes exist as placeholders for the future public API collectors.
@@ -130,7 +131,7 @@ The About screen includes a small Developer section with a `Mock telemetry` togg
 
 ## Location Mode and Quality
 
-Location mode controls how aggressively the future Android GNSS/location source should request fixes. It does not lower the quality bar for coverage logs.
+Location mode controls how aggressively the future Android GNSS/location source should request fixes. It does not lower the quality bar for recorded coverage samples.
 
 ```text
 Balanced
@@ -172,11 +173,12 @@ docs/architecture-notes.md
 Core first-version assumptions:
 
 - Scanning requires app-level consent and Android permission grants
-- Participation can stop by stopping scanning or uninstalling the app
-- The main UI should expose a clear scanning on/off control
+- The normal experience is consent once, then let scanning run in the background
+- Participation can pause by stopping scanning and can stop by uninstalling the app
+- The main UI should expose a clear scanning on/off control for off hours, battery saving, or user choice
 - The prototype samples on a fixed internal cadence; settings should avoid scanner controls that do not change real collection behavior
-- Settings should include location behavior, reporting, local logs, and About details
-- Local logging is the source of truth; user-facing exports are generated as CSV when needed
+- Settings should include location behavior, reporting, recorded coverage data, and About details
+- The local database is the source of truth; CSV is the user-facing export format, while JSONL remains internal to reporting/debug workflows
 
 ## Notes
 

@@ -1,13 +1,14 @@
 plugins {
     id("com.android.application")
+    id("com.google.devtools.ksp")
 }
 
 android {
-    namespace = "no.politiet.pit"
+    namespace = "app.fivegscanner"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "no.politiet.pit"
+        applicationId = "app.fivegscanner"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -22,4 +23,9 @@ android {
     kotlin {
         jvmToolchain(17)
     }
+}
+
+dependencies {
+    implementation("androidx.room:room-runtime:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
 }

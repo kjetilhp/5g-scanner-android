@@ -49,7 +49,7 @@ HighAccuracy
 LowPower
 ```
 
-Modes describe how aggressively the app should request location fixes, not what quality of location is accepted into logs:
+Modes describe how aggressively the app should request location fixes, not what quality of location is accepted into recorded samples:
 
 ```text
 Balanced: adaptive default; save battery when still/slow, request fresher fixes while driving
@@ -63,7 +63,7 @@ The implementation can decide later whether to use Android platform location API
 
 ### Reporting Mode
 
-Reporting controls how locally stored coverage logs leave the device.
+Reporting controls how locally stored coverage samples leave the device.
 
 ```text
 ReportingMode:
@@ -75,10 +75,10 @@ ReportingMode:
 
 Examples:
 
-- Hourly: upload saved logs about once per hour for normal crowdsourcing while early reporting is being validated
-- Daily: upload saved logs about once per day for lower-impact crowdsourcing
+- Hourly: upload saved samples about once per hour for normal crowdsourcing while early reporting is being validated
+- Daily: upload saved samples about once per day for lower-impact crowdsourcing
 - Continuous: upload new samples soon after they are collected for developers, engineers, and live field testing
-- Manual: keep logs on the device until the user exports them, shares them, or uses a manual send action
+- Manual: keep samples on the device until the user exports them, shares them, or uses a manual send action
 
 The scanner should still write locally first. Upload failures must leave data queued locally for later retry or manual export.
 
@@ -116,7 +116,7 @@ The app should derive one effective state from these inputs and show that state 
 
 ## Future Settings
 
-Defer these until the app has basic local logging and reporting:
+Defer these until the app has basic local sample storage and reporting:
 
 - Upload/sync destination
 - Wi-Fi-only upload

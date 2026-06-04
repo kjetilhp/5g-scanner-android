@@ -2,7 +2,11 @@
 
 ## User Promise
 
-This app lets a user voluntarily help map 5G/LTE coverage with their Android phone.
+This app lets a user voluntarily help build a real 5G/LTE coverage data set with their Android phone.
+
+The normal experience is simple: install the app, grant consent, and let it work quietly in the background. The app should collect useful signal/location samples over time in the places participants actually work and travel.
+
+The app only collects coverage data. It is not a speed test, navigation app, or network optimization tool.
 
 The app should only scan when all of these are true:
 
@@ -10,7 +14,9 @@ The app should only scan when all of these are true:
 - The required Android permissions are granted
 - Scanning is not stopped
 
-The first version should log locally first. Reporting is controlled by a small reporting-mode setting and must remain consent-gated, transparent, and easy to explain.
+The first version should store samples locally first. Reporting is controlled by a small reporting-mode setting and must remain consent-gated, transparent, and easy to explain.
+
+Most users should rarely change settings. Engineers may inspect recorded samples or adjust behavior more often, but engineer workflows should remain secondary to the crowdsourcing participant experience.
 
 ## First Screens
 
@@ -22,7 +28,7 @@ The first-run flow should explain in plain language:
 - Why it is collected: voluntary crowdsourced coverage mapping
 - Where it goes: local device storage first, with periodic reporting according to the user's reporting setting
 - How reporting is controlled: Hourly, Daily, Continuous, Manual, and Send now
-- How the user can stop scanning or revoke consent
+- How the user can pause scanning for off hours or battery conservation, and how participation can stop
 
 Consent should be tracked by the app separately from Android OS permission grants.
 
@@ -34,7 +40,7 @@ The main screen should be quiet and practical:
 - Current state: idle, scanning, paused, missing permission, or consent required
 - Last sample time
 - Samples collected in the current session
-- Local log status
+- Local recorded-data status
 - Optional current radio summary once available
 
 The user should never need to understand radio engineering details to know whether the app is scanning.
@@ -43,10 +49,10 @@ The user should never need to understand radio engineering details to know wheth
 
 Settings should favor a small number of understandable controls:
 
-- Pause/resume scanning
+- Pause/resume scanning, including future pause-until support
 - Location/GNSS behavior
 - Reporting mode and last sent status
-- Coverage log CSV preview/share
+- Recorded coverage data inspector with CSV export
 - Consent and permission management
 - Local data deletion
 

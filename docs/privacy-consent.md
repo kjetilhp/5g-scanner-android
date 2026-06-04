@@ -2,14 +2,14 @@
 
 ## Principles
 
-The app should be built around informed, reversible participation.
+The app should be built around informed, reversible participation. The user is helping build a coverage map by carrying their phone; consent text should be plain, concrete, and free of power-user language.
 
 - Consent must be explicit before scanning begins
 - Android permissions must be requested only with context
 - Revoking consent must stop scanning
 - Permission revocation must be handled gracefully
 - Reporting/upload behavior must not be added or changed silently
-- Local logs should be deletable by the user
+- Local coverage samples should be deletable by the user
 
 This document is product guidance, not legal advice.
 
@@ -53,15 +53,17 @@ Avoid collecting personal account data or contact/user identifiers unless a late
 
 User-facing copy should state that coverage data is intended for coverage mapping and is not intended to identify the participant or be traced back to them.
 
+User-facing copy should also make the purpose clear: the app measures 5G/LTE signal quality over time in real places where participants work and travel.
+
 ## Local-First Reporting
 
 Initial behavior:
 
-- Store logs locally on device first
+- Store coverage samples locally on device first
 - Report according to the user's reporting setting
 - Allow scanning to be stopped
-- Allow local log deletion
-- Allow user-facing CSV preview/share export
+- Allow local data deletion
+- Allow user-facing CSV export/share
 
 Material reporting/upload changes should require:
 
@@ -88,3 +90,5 @@ When Android permissions are revoked:
 ## Background Scanning
 
 If background scanning is supported, it should use Android foreground service patterns with a visible notification while active. The user should be able to return to the app and stop scanning from the main screen.
+
+Background scanning is the intended normal experience after consent. Stopping or future pause-until controls should be presented as ordinary ways to pause participation for off hours, battery conservation, or user choice.

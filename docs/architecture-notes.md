@@ -14,7 +14,7 @@ The app should be designed around one effective scanner state derived from conse
 app/        UI, permission flow, service wiring
 core/       Domain models, JSONL encoding, contract tests
 telemetry/  Android location, connectivity, and cellular collectors
-storage/    Log files, export, retention
+storage/    Database persistence, reporting state, CSV export, retention
 docs/       Contract and design notes
 samples/    Small curated fixtures
 external/   Reference projects such as node-scanner
@@ -24,15 +24,15 @@ The first checked-in Android skeleton contains only `app/` and a simple native `
 
 ## Current Android Package Shape
 
-The prototype still uses a single Gradle `app` module, but code inside `no.politiet.pit` is split by responsibility:
+The prototype still uses a single Gradle `app` module, but code inside `app.fivegscanner` is split by responsibility:
 
 ```text
 domain/     Plain Kotlin modes and future scanner contract models
 encoding/   JSONL/sample encoders that can be tested away from Android UI
 telemetry/  Radio/GNSS source interfaces, mock sources, Android source stubs, and sample assembly
-storage/    App preferences and coverage log persistence
+storage/    App preferences, coverage database persistence, and CSV export
 reporting/  Alarm receivers and reporting scheduler
-ScannerService.kt  Foreground active scanner loop and log writer
+ScannerService.kt  Foreground active scanner loop and sample writer
 ```
 
 `MainActivity` should keep shrinking toward lifecycle, navigation, and view rendering. Active scanning now lives in `ScannerService`: the Activity starts/stops it based on consent, runtime location/notification permissions, device feature guards, and the user scanning toggle, then renders the latest service state. Scanner state transitions, contract encoding, collectors, persistence, and reporting should live outside the Activity unless they are directly tied to Android view lifecycle.
@@ -55,7 +55,7 @@ Scanner sampling should keep GNSS and radio collection separate. Radio events or
 
 Telemetry source selection is centralized in `TelemetrySourceFactory`. The app has a Developer setting named `Mock telemetry`, persisted in app preferences and shown under About. Mock telemetry defaults to enabled for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle so the Android collector placeholders are not accidentally exercised there. When disabled on a physical device, the scanner service routes through `AndroidRadioTelemetrySource` and `AndroidGnssTelemetrySource`; those classes currently remain placeholders returning no telemetry until real collectors are implemented. The main scanner UI shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
-The scanner loop is a foreground service. While scanning is active, `ScannerService` owns radio ticks, GNSS refreshes, sample assembly, JSONL writes, and continuous reporting triggers. The main UI observes an in-process state snapshot and receives service-state broadcasts while visible; the UI's own GNSS timer only updates the displayed `Ys ago` age and does not collect location. Stopping scanning stops the service and removes its foreground notification.
+The scanner loop is a foreground service. While scanning is active, `ScannerService` owns radio ticks, GNSS refreshes, sample assembly, Room/SQLite persistence, and continuous reporting triggers. CSV artifacts are generated from selected database rows for user-facing export. JSONL remains an internal reporting/compatibility contract, not a normal user export. The main UI observes an in-process state snapshot and receives service-state broadcasts while visible; the UI's own GNSS timer only updates the displayed `Ys ago` age and does not collect location. Stopping scanning stops the service and removes its foreground notification.
 
 ### Scanner Resilience Target
 
