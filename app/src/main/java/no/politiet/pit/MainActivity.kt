@@ -41,6 +41,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.AnimationUtils
 import android.view.animation.LinearInterpolator
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -83,6 +84,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var gnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
     private var mockTelemetryEnabled = true
+    private var enhancedPrivacyEnabled = false
     private var lastReportedAt: Instant? = null
     private val mobileOperatorLookup: MobileOperatorLookup by lazy {
         MobileOperatorLookup.fromRawResource(this, R.raw.mobile_operators)
@@ -103,6 +105,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
     private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
+    private var pendingAnimatedSampleId: Long? = null
     private var scannerStateReceiverRegistered = false
     private lateinit var coverageDataStore: CoverageDataStore
     private lateinit var settingsStore: AppSettingsStore
@@ -169,11 +172,22 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private val scannerStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != ScannerService.ACTION_STATE_CHANGED) return
-            syncScannerStateFromService(animateBars = true)
-            if (!showingSettings) {
-                updateScannerUi()
-                scheduleSettingsRefresh()
+            when (intent?.action) {
+                ScannerService.ACTION_STATE_CHANGED -> {
+                    syncScannerStateFromService(animateBars = true)
+                    if (!showingSettings) {
+                        updateScannerUi()
+                    }
+                }
+                ScannerService.ACTION_SAMPLE_RECORDED -> {
+                    if (showingSettings && settingsDestination == SettingsDestination.CoverageData) {
+                        pendingAnimatedSampleId = intent.getLongExtra(ScannerService.EXTRA_SAMPLE_ID, 0L)
+                            .takeIf { it > 0L }
+                        render()
+                    } else {
+                        scheduleSettingsRefresh()
+                    }
+                }
             }
         }
     }
@@ -396,6 +410,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         content.addView(scannerTitleBlock())
+        if (enhancedPrivacyEnabled) {
+            content.addView(privacyModeIndicator(), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = dp(2)
+            })
+        }
 
         telemetryBars = TelemetryBarsView().apply {
             setLiveMetricProvider { latestTelemetry.metrics() }
@@ -486,6 +509,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             },
         ))
 
+        content.addView(settingsSectionLabel(getString(R.string.settings_section_privacy)))
+        content.addView(settingsGroup(
+            settingsToggleRow(
+                title = getString(R.string.setting_enhanced_privacy_title),
+                summary = getString(R.string.setting_enhanced_privacy_summary),
+                isChecked = enhancedPrivacyEnabled,
+            ) { enabled ->
+                enhancedPrivacyEnabled = enabled
+                Log.d(TAG, "Enhanced privacy changed: enabled=$enhancedPrivacyEnabled")
+                saveState()
+                render()
+            },
+        ))
+
         val reportingRows = mutableListOf<View>(
             settingsPreferenceRow(
                 title = getString(R.string.setting_reporting_mode_title),
@@ -564,29 +601,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         content.addView(settingsSectionLabel(getString(R.string.settings_section_coverage_data)))
-        content.addView(settingsGroup(
-            settingsInfoRow(
-                title = if (stats.sampleCount == 0) {
-                    getString(R.string.coverage_data_empty_title)
-                } else {
-                    getString(R.string.coverage_data_inspector_title)
-                },
-                summary = if (stats.sampleCount == 0) {
-                    getString(R.string.coverage_data_empty_summary)
-                } else {
-                    getString(
-                        R.string.coverage_data_inspector_stats,
-                        stats.sampleCount,
-                        stats.dayCount,
-                        formatBytes(stats.estimatedBytes),
-                    )
-                },
-            ),
-            settingsInfoRow(
-                title = getString(R.string.coverage_data_inspector_title),
-                summary = getString(R.string.coverage_data_inspector_summary),
-            ),
-        ))
+        content.addView(coverageDataStatsGroup(stats))
         if (stats.sampleCount > 0) {
             content.addView(settingsSectionLabel(getString(R.string.coverage_data_actions_title)))
             content.addView(settingsGroup(
@@ -610,6 +625,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             content.addView(settingsGroup(*recentSamples.map { sample ->
                 inspectionSampleRow(sample)
             }.toTypedArray()))
+            pendingAnimatedSampleId = null
         }
 
         return settingsScreen(
@@ -636,9 +652,26 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .show()
     }
 
+    private fun coverageDataStatsGroup(stats: CoverageDataStore.RecordedDataStats): LinearLayout {
+        return settingsGroup(
+            settingsInfoRow(
+                title = getString(R.string.coverage_data_summary_title),
+                summary = getString(
+                    R.string.coverage_data_storage_summary,
+                    formatBytes(stats.estimatedBytes),
+                    resources.getQuantityString(
+                        R.plurals.coverage_data_sample_count,
+                        stats.sampleCount,
+                        stats.sampleCount,
+                    ),
+                ),
+            ),
+        )
+    }
+
     private fun inspectionSampleTitle(sample: CoverageDataStore.InspectionSample): String =
         buildString {
-            append(dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis)))
+            append(inspectionSampleCapturedAtText(sample))
             append(" - ")
             append(sample.rat.ifBlank { sample.kind })
             sample.band.takeIf { it.isNotBlank() }?.let { band ->
@@ -648,21 +681,59 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             if (sample.mockTelemetry) append(" - MOCK")
         }
 
+    private fun inspectionSampleCapturedAtText(sample: CoverageDataStore.InspectionSample): String {
+        val capturedAt = Instant.ofEpochMilli(sample.capturedAtEpochMillis)
+        val capturedDate = capturedAt.atZone(ZoneId.systemDefault()).toLocalDate()
+        return if (sample.privacyReduced) {
+            capturedDate.toString()
+        } else if (capturedDate == java.time.LocalDate.now()) {
+            clockFormatter.format(capturedAt)
+        } else {
+            dateTimeFormatter.format(capturedAt)
+        }
+    }
+
     private fun inspectionSampleRow(sample: CoverageDataStore.InspectionSample): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             minimumHeight = dp(86)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = rippleBackground(Color.WHITE, dp(16))
+            background = rippleBackground(
+                if (sample.privacyReduced) PRIVACY_SAMPLE_BACKGROUND else Color.WHITE,
+                dp(16),
+            )
             isFocusable = true
             setOnClickListener { showInspectionSampleDetails(sample) }
+            if (sample.id == pendingAnimatedSampleId) {
+                startAnimation(AnimationUtils.loadAnimation(this@MainActivity, android.R.anim.fade_in))
+            }
 
-            addView(TextView(this@MainActivity).apply {
-                text = inspectionSampleTitle(sample)
-                textSize = 15f
-                setTextColor(SETTINGS_TEXT)
-                includeFontPadding = false
-                maxLines = 1
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply {
+                    text = inspectionSampleTitle(sample)
+                    textSize = 15f
+                    setTextColor(SETTINGS_TEXT)
+                    includeFontPadding = false
+                    maxLines = 1
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                if (sample.privacyReduced) {
+                    addView(TextView(this@MainActivity).apply {
+                        text = getString(R.string.enhanced_privacy_active)
+                        textSize = 11f
+                        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                        setTextColor(SETTINGS_ACCENT)
+                        includeFontPadding = false
+                        setPadding(dp(8), dp(4), dp(8), dp(4))
+                        background = roundedBackground(Color.WHITE, dp(12))
+                    }, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        marginStart = dp(12)
+                    })
+                }
             })
             addView(InspectionSampleBarsView(sample.inspectionMetricBars()), LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -681,21 +752,24 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 hasValue = rsrp.isNotBlank(),
             ),
             InspectionMetricBar(
+                label = "RSRQ",
+                valueText = rsrq.ifBlank { "-" },
+                quality = rsrq.toFloatOrNull()?.let(::rsrqQuality) ?: 0f,
+                hasValue = rsrq.isNotBlank(),
+            ),
+            InspectionMetricBar(
                 label = "SINR",
                 valueText = sinr.ifBlank { "-" },
                 quality = sinr.toFloatOrNull()?.let(::sinrQuality) ?: 0f,
                 hasValue = sinr.isNotBlank(),
             ),
-            InspectionMetricBar(
-                label = "LOC",
-                valueText = if (lat.isNotBlank() && lon.isNotBlank()) "OK" else "-",
-                quality = if (lat.isNotBlank() && lon.isNotBlank()) 0.78f else 0f,
-                hasValue = lat.isNotBlank() && lon.isNotBlank(),
-            ),
         )
 
     private fun rsrpQuality(value: Float): Float =
         ((value + 120f) / 40f).coerceIn(0f, 1f)
+
+    private fun rsrqQuality(value: Float): Float =
+        ((value + 20f) / 17f).coerceIn(0f, 1f)
 
     private fun sinrQuality(value: Float): Float =
         ((value + 5f) / 30f).coerceIn(0f, 1f)
@@ -711,16 +785,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun inspectionSampleDetailText(sample: CoverageDataStore.InspectionSample): String =
         buildString {
             appendLine(getString(R.string.coverage_sample_detail_summary, sample.id))
-            appendLine("Captured: ${dateTimeFormatter.format(Instant.ofEpochMilli(sample.capturedAtEpochMillis))}")
+            appendLine("Captured: ${inspectionSampleCapturedAtText(sample)}")
             appendLine("Kind: ${sample.kind}")
             appendLine("RAT: ${sample.rat.ifBlank { "unknown" }}")
             appendLine("MCC/MNC: ${sample.mcc.ifBlank { "?" }}/${sample.mnc.ifBlank { "?" }}")
             appendLine("Cell ID: ${sample.cellId.ifBlank { "unknown" }}")
             appendLine("Band: ${sample.band.ifBlank { "unknown" }}")
             appendLine("RSRP: ${sample.rsrp.ifBlank { "unknown" }}")
+            appendLine("RSRQ: ${sample.rsrq.ifBlank { "unknown" }}")
             appendLine("SINR: ${sample.sinr.ifBlank { "unknown" }}")
             appendLine("Location: ${if (sample.lat.isNotBlank() && sample.lon.isNotBlank()) "${sample.lat}, ${sample.lon}" else "unknown"}")
             appendLine("Mock telemetry: ${if (sample.mockTelemetry) "yes" else "no"}")
+            appendLine("Enhanced privacy applied: ${if (sample.privacyReduced) "yes" else "no"}")
             appendLine("Upload status: ${sample.uploadStatus}")
             appendLine()
             appendLine(sample.sampleJson)
@@ -1085,7 +1161,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun registerScannerStateReceiver() {
         if (scannerStateReceiverRegistered) return
-        val filter = IntentFilter(ScannerService.ACTION_STATE_CHANGED)
+        val filter = IntentFilter().apply {
+            addAction(ScannerService.ACTION_STATE_CHANGED)
+            addAction(ScannerService.ACTION_SAMPLE_RECORDED)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(scannerStateReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
@@ -1210,9 +1289,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         gnssMode = settings.gnssMode
         reportingMode = settings.reportingMode
         mockTelemetryEnabled = settings.mockTelemetryEnabled
+        enhancedPrivacyEnabled = settings.enhancedPrivacyEnabled
         lastReportedAt = settings.lastReportedAt
         latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
-        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportedAt=$lastReportedAt")
+        Log.d(TAG, "Loaded state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportedAt=$lastReportedAt")
     }
 
     private fun saveState() {
@@ -1222,8 +1302,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             gnssMode = gnssMode,
             reportingMode = reportingMode,
             mockTelemetryEnabled = mockTelemetryEnabled,
+            enhancedPrivacyEnabled = enhancedPrivacyEnabled,
         )
-        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled")
+        Log.d(TAG, "Saved state: consentGranted=$consentGranted, scannerStopped=$stoppedManually, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled")
     }
 
     private fun logAppliedSettingsOnLaunch() {
@@ -1231,7 +1312,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         Log.i(
             TAG,
-            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
         )
     }
 
@@ -1330,6 +1411,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             includeFontPadding = false
             setPadding(dp(8), dp(8), dp(8), dp(8))
             background = roundedBackground(SCANNER_PANEL, dp(8))
+        }
+
+    private fun privacyModeIndicator(): TextView =
+        TextView(this).apply {
+            text = getString(R.string.enhanced_privacy_active)
+            textSize = 12f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(Color.rgb(0, 38, 62))
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = roundedBackground(SCANNER_TITLE_SIGNAL, dp(14))
         }
 
     private fun servingCellSummary(cell: Cell): CharSequence {
@@ -1553,7 +1646,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 isClickable = false
                 isFocusable = false
             }
-            addView(checkBox, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(checkBox, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                marginStart = dp(16)
+            })
             setOnClickListener {
                 if (!isEnabled) return@setOnClickListener
                 val next = !checkBox.isChecked
@@ -2893,5 +2988,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val SETTINGS_CHEVRON: Int = Color.rgb(145, 145, 145)
         val SETTINGS_DIVIDER: Int = Color.rgb(226, 229, 231)
         val SETTINGS_RIPPLE: Int = Color.argb(26, 0, 114, 206)
+        val PRIVACY_SAMPLE_BACKGROUND: Int = Color.rgb(255, 252, 235)
     }
 }

@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import no.politiet.pit.domain.CoverageSamplePrivacyReducer
 import no.politiet.pit.domain.GnssMode
 import no.politiet.pit.domain.ReportingMode
 import no.politiet.pit.encoding.CoverageSampleJsonEncoder
@@ -54,6 +55,7 @@ class ScannerService : Service() {
     private var telemetryGnssMode = GnssMode.Balanced
     private var reportingMode = ReportingMode.Hourly
     private var mockTelemetryEnabled = true
+    private var enhancedPrivacyEnabled = false
     private var effectiveMockTelemetry = true
 
     private val sampler = object : Runnable {
@@ -158,6 +160,7 @@ class ScannerService : Service() {
             configureTelemetrySources(useMockTelemetry)
         }
         mockTelemetryEnabled = settings.mockTelemetryEnabled
+        enhancedPrivacyEnabled = settings.enhancedPrivacyEnabled
         if (telemetryGnssMode != gnssMode) {
             latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
             telemetryGnssMode = gnssMode
@@ -239,24 +242,39 @@ class ScannerService : Service() {
                     return@runCatching
                 }
             }
-            val sampleJson = CoverageSampleJsonEncoder.encode(sample)
-            persistCoverageSample(sampleJson, capturedAt)
-            Log.d(TAG, "Persisted coverage sample: sampleNumber=$sampleNumber, capturedAt=$capturedAt")
+            val storedSample = if (enhancedPrivacyEnabled) {
+                CoverageSamplePrivacyReducer.reduce(sample)
+            } else {
+                sample
+            }
+            val sampleJson = CoverageSampleJsonEncoder.encode(storedSample)
+            persistCoverageSample(
+                sampleJson = sampleJson,
+                capturedAt = storedSample.fix.timestamp,
+                privacyReduced = enhancedPrivacyEnabled,
+            )
+            Log.d(TAG, "Persisted coverage sample: sampleNumber=$sampleNumber, capturedAt=${storedSample.fix.timestamp}, privacyReduced=$enhancedPrivacyEnabled")
         }.onFailure { error ->
             Log.e(TAG, "Could not persist coverage sample", error)
         }
     }
 
-    private fun persistCoverageSample(sampleJson: String, capturedAt: Instant) {
+    private fun persistCoverageSample(sampleJson: String, capturedAt: Instant, privacyReduced: Boolean) {
         val mockTelemetry = effectiveMockTelemetry
         CoverageDatabaseProvider.ioExecutor.execute {
             runCatching {
-                CoverageDatabaseProvider.database(this).coverageSampleDao().insert(
+                val sampleId = CoverageDatabaseProvider.database(this).coverageSampleDao().insert(
                     CoverageSampleEntity.from(
                         sampleJson = sampleJson,
                         capturedAt = capturedAt,
                         mockTelemetry = mockTelemetry,
+                        privacyReduced = privacyReduced,
                     ),
+                )
+                sendBroadcast(
+                    Intent(ACTION_SAMPLE_RECORDED)
+                        .setPackage(packageName)
+                        .putExtra(EXTRA_SAMPLE_ID, sampleId),
                 )
             }.onFailure { error ->
                 Log.e(TAG, "Could not persist coverage sample", error)
@@ -370,6 +388,8 @@ class ScannerService : Service() {
         const val ACTION_START = "no.politiet.pit.ScannerService.START"
         const val ACTION_STOP = "no.politiet.pit.ScannerService.STOP"
         const val ACTION_STATE_CHANGED = "no.politiet.pit.ScannerService.STATE_CHANGED"
+        const val ACTION_SAMPLE_RECORDED = "no.politiet.pit.ScannerService.SAMPLE_RECORDED"
+        const val EXTRA_SAMPLE_ID = "sampleId"
         private const val TAG = "5GScanner"
         private const val NOTIFICATION_ID = 4201
         private const val NOTIFICATION_CHANNEL_ID = "scanner"

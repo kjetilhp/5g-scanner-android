@@ -45,7 +45,7 @@ interface CoverageSampleDao {
     @Query(
         """
         SELECT * FROM coverage_samples
-        ORDER BY captured_at_epoch_millis DESC, id DESC
+        ORDER BY id DESC
         LIMIT :limit
         """,
     )

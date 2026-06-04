@@ -13,6 +13,7 @@ class AppSettingsStore(private val context: Context) {
         val gnssMode: GnssMode,
         val reportingMode: ReportingMode,
         val mockTelemetryEnabled: Boolean,
+        val enhancedPrivacyEnabled: Boolean,
         val lastReportedAt: Instant?,
     )
 
@@ -31,6 +32,7 @@ class AppSettingsStore(private val context: Context) {
                 preferences.getString(ReportingScheduler.KEY_REPORTING_MODE, ReportingMode.Hourly.name),
             ),
             mockTelemetryEnabled = preferences.getBoolean(KEY_MOCK_TELEMETRY_ENABLED, true),
+            enhancedPrivacyEnabled = preferences.getBoolean(KEY_ENHANCED_PRIVACY_ENABLED, false),
             lastReportedAt = ReportingScheduler.lastReportedAt(context),
         )
     }
@@ -41,6 +43,7 @@ class AppSettingsStore(private val context: Context) {
         gnssMode: GnssMode,
         reportingMode: ReportingMode,
         mockTelemetryEnabled: Boolean,
+        enhancedPrivacyEnabled: Boolean,
     ) {
         ReportingScheduler.appPreferences(context).edit()
             .putBoolean(ReportingScheduler.KEY_CONSENT_GRANTED, consentGranted)
@@ -48,6 +51,7 @@ class AppSettingsStore(private val context: Context) {
             .putString(KEY_GNSS_MODE, gnssMode.name)
             .putString(ReportingScheduler.KEY_REPORTING_MODE, reportingMode.name)
             .putBoolean(KEY_MOCK_TELEMETRY_ENABLED, mockTelemetryEnabled)
+            .putBoolean(KEY_ENHANCED_PRIVACY_ENABLED, enhancedPrivacyEnabled)
             .apply()
     }
 
@@ -55,5 +59,6 @@ class AppSettingsStore(private val context: Context) {
         const val KEY_SCANNER_STOPPED = "scannerStopped"
         const val KEY_GNSS_MODE = "gnssMode"
         const val KEY_MOCK_TELEMETRY_ENABLED = "mockTelemetryEnabled"
+        const val KEY_ENHANCED_PRIVACY_ENABLED = "enhancedPrivacyEnabled"
     }
 }

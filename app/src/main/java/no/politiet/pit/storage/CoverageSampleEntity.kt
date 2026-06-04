@@ -28,6 +28,8 @@ data class CoverageSampleEntity(
     val sampleJson: String,
     @ColumnInfo(name = "mock_telemetry")
     val mockTelemetry: Boolean,
+    @ColumnInfo(name = "privacy_reduced")
+    val privacyReduced: Boolean = false,
     @ColumnInfo(name = "upload_status")
     val uploadStatus: String = UploadStatusPending,
     @ColumnInfo(name = "upload_batch_id")
@@ -48,12 +50,14 @@ data class CoverageSampleEntity(
             sampleJson: String,
             capturedAt: Instant,
             mockTelemetry: Boolean,
+            privacyReduced: Boolean,
         ): CoverageSampleEntity =
             CoverageSampleEntity(
                 capturedAtEpochMillis = capturedAt.toEpochMilli(),
                 capturedDateUtc = dayFormatter.format(capturedAt),
                 sampleJson = sampleJson,
                 mockTelemetry = mockTelemetry,
+                privacyReduced = privacyReduced,
             )
     }
 }
