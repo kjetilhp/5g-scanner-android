@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "app.fivegscanner"
+    namespace = "no.politiet.pit"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "app.fivegscanner"
+        applicationId = "no.politiet.pit"
         minSdk = 29
         targetSdk = 36
         versionCode = 1

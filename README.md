@@ -60,7 +60,7 @@ settings.gradle.kts
 build.gradle.kts
 app/build.gradle.kts
 app/src/main/AndroidManifest.xml
-app/src/main/java/app/fivegscanner/MainActivity.kt
+app/src/main/java/no/politiet/pit/MainActivity.kt
 ```
 
 It uses a single native Android `Activity` and avoids Compose. AndroidX Room is included for local sample persistence; CSV is the user-facing export format. Android Studio can open the project and sync Gradle.

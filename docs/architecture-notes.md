@@ -24,7 +24,7 @@ The first checked-in Android skeleton contains only `app/` and a simple native `
 
 ## Current Android Package Shape
 
-The prototype still uses a single Gradle `app` module, but code inside `app.fivegscanner` is split by responsibility:
+The prototype still uses a single Gradle `app` module, but code inside `no.politiet.pit` is split by responsibility:
 
 ```text
 domain/     Plain Kotlin modes and future scanner contract models
