@@ -26,6 +26,8 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - Relaunch the app and confirm scanning remains stopped.
 - Start scanning again and confirm sample count increases.
 - With mock telemetry disabled on a physical device, confirm logcat shows Android radio telemetry registration and LTE/NR serving-cell updates when the device exposes them.
+- With mock telemetry disabled on a physical device, confirm logcat shows Android GNSS request tier changes and location fixes when location is enabled.
+- Walk or drive briefly and confirm GNSS request tier moves toward balanced/high when speed increases, then back toward low when stationary.
 - Turn location off and confirm the app shows an error state instead of silently stopping.
 - Turn location back on and confirm scanning can resume.
 - Enable airplane mode and confirm the app shows an error state.
@@ -76,5 +78,5 @@ Use this before moving from emulator/mock testing into physical-device field tes
 
 - Automatic scanner restart after reboot is not fully enabled yet for physical-device field use.
 - Android radio collection has a first LTE/NR serving-cell implementation, but still needs real-device validation across phone models, carriers, SIM states, NSA/SA behavior, and screen-off conditions.
-- Android GNSS/location collection is still a placeholder, so physical-device non-mock sampling will not persist accepted coverage samples until GNSS wiring lands.
+- Android GNSS/location collection has a first adaptive `LocationManager` implementation, but still needs real-device validation for provider behavior, speed-based tier changes, accuracy, screen-off behavior, and battery impact.
 - Cleartext HTTP is enabled for the prototype endpoint and should be replaced by TLS before production use.

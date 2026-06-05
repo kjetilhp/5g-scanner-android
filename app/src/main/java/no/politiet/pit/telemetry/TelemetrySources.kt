@@ -12,7 +12,7 @@ interface RadioTelemetrySource {
 }
 
 interface GnssTelemetrySource {
-    fun start() = Unit
+    fun start(gnssMode: GnssMode = GnssMode.Balanced) = Unit
     fun stop() = Unit
     fun latest(sampleNumber: Int, capturedAt: Instant, gnssMode: GnssMode): GnssTelemetry?
 }

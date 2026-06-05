@@ -147,7 +147,7 @@ RadioTelemetrySource + GnssTelemetrySource
   -> CoverageDatabase
 ```
 
-Mock radio/GNSS sources are active for emulator development. The Android radio source now registers telephony callbacks on API 31+ and uses the legacy listener fallback on API 29-30, then maps registered LTE/NR serving cells into the existing domain model. Radio events update the latest in-memory snapshot and can request a debounced near-term sample, but accepted coverage samples are still written by the scanner tick after pairing radio with the latest acceptable GNSS fix. The Android GNSS source remains a placeholder until location-provider wiring is implemented.
+Mock radio/GNSS sources are active for emulator development. The Android radio source now registers telephony callbacks on API 31+ and uses the legacy listener fallback on API 29-30, then maps registered LTE/NR serving cells into the existing domain model. Radio events update the latest in-memory snapshot and can request a debounced near-term sample, but accepted coverage samples are still written by the scanner tick after pairing radio with the latest acceptable GNSS fix. The Android GNSS source uses `LocationManager`, keeps latest reported/usable fixes in memory, and adapts request aggressiveness from low power while stationary to high accuracy while driving.
 
 Multi-SIM collection should happen in the sampler before the UI becomes SIM-aware. On a scanner tick, one acceptable GNSS fix may be paired with every usable active subscription/modem snapshot, producing one coverage sample per active radio source when Android exposes registered radio data. Android subscription IDs and SIM slots are used only inside the Android collector to register callbacks and order sources; they should not be persisted, reported, or exported. The current main UI may continue showing the default-data or first active radio source; a later UI pass should add a small SIM/source indicator and optional swipe left/right behavior for switching the displayed source. The subscription carrier label from Android can be kept for UI/debug display, but the observed network remains the cell MCC/MNC.
 
@@ -165,7 +165,7 @@ The About screen includes a small Developer section with a `Mock telemetry` togg
 
 ## Location Mode and Quality
 
-Location mode controls how aggressively the future Android GNSS/location source should request fixes. It does not lower the quality bar for recorded coverage samples.
+Location mode controls the starting aggressiveness for Android GNSS/location requests, and movement speed can adapt the active request tier: low power while stationary, balanced while moving slowly, and high accuracy while driving. It does not lower the quality bar for recorded coverage samples.
 
 ```text
 Balanced

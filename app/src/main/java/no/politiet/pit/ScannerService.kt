@@ -174,6 +174,10 @@ class ScannerService : Service() {
         if (telemetryGnssMode != gnssMode) {
             latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
             telemetryGnssMode = gnssMode
+            if (telemetrySourcesStarted) {
+                stopTelemetrySources()
+                startTelemetrySources()
+            }
         }
     }
 
@@ -195,7 +199,7 @@ class ScannerService : Service() {
     private fun startTelemetrySources() {
         if (telemetrySourcesStarted) return
         radioTelemetrySource.start(::requestSampleSoonForRadioEvent)
-        gnssTelemetrySource.start()
+        gnssTelemetrySource.start(gnssMode)
         telemetrySourcesStarted = true
     }
 
