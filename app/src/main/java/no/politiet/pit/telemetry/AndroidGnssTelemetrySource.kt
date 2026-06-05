@@ -84,6 +84,12 @@ class AndroidGnssTelemetrySource(
         )
     }
 
+    override fun diagnostics(): GnssSourceDiagnostics =
+        GnssSourceDiagnostics(
+            activeTier = currentTier?.name,
+            latestUpdateAt = latestReportedFix?.receivedAt,
+        )
+
     private fun handleLocation(location: Location) {
         val capturedAt = Instant.now()
         val telemetry = location.toTelemetry(capturedAt)

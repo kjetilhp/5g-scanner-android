@@ -103,9 +103,17 @@ class AndroidRadioTelemetrySource(
         return synchronized(latestBySubscription) {
             latestBySubscription.values
                 .sortedWith(compareByDescending<RadioTelemetry> { it.isDefaultDataSubscription }
-                    .thenBy { it.radioSourceIndex })
+                .thenBy { it.radioSourceIndex })
         }
     }
+
+    override fun diagnostics(): RadioSourceDiagnostics =
+        synchronized(latestBySubscription) {
+            RadioSourceDiagnostics(
+                sourceCount = registrations.size,
+                latestUpdateAt = latestBySubscription.values.maxOfOrNull { it.receivedAt },
+            )
+        }
 
     @SuppressLint("MissingPermission")
     private fun activeRegistrations(): List<RadioRegistration> {
@@ -203,7 +211,14 @@ class AndroidRadioTelemetrySource(
             .filter { it.isRegistered }
             .mapNotNull { toRadioTelemetry(registration, it) }
             .maxByOrNull { radioPriority(it) }
-            ?: return
+        if (telemetry == null) {
+            val registeredCount = cellInfo.count { it.isRegistered }
+            Log.d(
+                TAG,
+                "Android radio telemetry had no usable serving cell: radioSource=${registration.radioSourceIndex}, cells=${cellInfo.size}, registeredCells=$registeredCount",
+            )
+            return
+        }
 
         val newServingCellKey = servingCellKey(telemetry)
         val servingCellChanged = registration.latestServingCellKey != null &&

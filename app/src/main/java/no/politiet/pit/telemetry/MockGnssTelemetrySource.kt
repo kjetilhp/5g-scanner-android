@@ -47,6 +47,12 @@ class MockGnssTelemetrySource : GnssTelemetrySource {
         )
     }
 
+    override fun diagnostics(): GnssSourceDiagnostics =
+        GnssSourceDiagnostics(
+            activeTier = "Mock",
+            latestUpdateAt = latestReportedFix?.receivedAt,
+        )
+
     private fun newFix(capturedAt: Instant, gnssMode: GnssMode): MockFixSnapshot {
         val positionWave = fixSequence % 36
         val qualityWave = fixSequence % 6

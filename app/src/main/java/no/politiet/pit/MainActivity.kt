@@ -1056,6 +1056,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ensureSamplerState()
                 render()
             },
+            settingsInfoRow(
+                title = getString(R.string.setting_telemetry_diagnostics_title),
+                summary = telemetryDiagnosticsSummary(),
+            ),
         ))
 
         return settingsScreen(
@@ -2139,6 +2143,35 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         } else {
             reportingEndpointUrl
         }
+
+    private fun telemetryDiagnosticsSummary(): String {
+        val diagnostics = ScannerService.currentState.diagnostics
+        val source = diagnostics.telemetrySource.replaceFirstChar { it.uppercase() }
+        val runningText = if (diagnostics.telemetrySourcesStarted) {
+            getString(R.string.telemetry_diagnostics_running)
+        } else {
+            getString(R.string.telemetry_diagnostics_waiting)
+        }
+        val gnssTier = diagnostics.gnssTier ?: getString(R.string.telemetry_diagnostics_unknown)
+        val lastSkip = diagnostics.lastSampleSkipReason ?: getString(R.string.telemetry_diagnostics_none)
+        return listOf(
+            getString(R.string.telemetry_diagnostics_source_line, source, runningText),
+            getString(R.string.telemetry_diagnostics_radio_line, diagnostics.radioSourceCount, formatDiagnosticsAge(diagnostics.lastRadioUpdateAt)),
+            getString(R.string.telemetry_diagnostics_gnss_line, gnssTier, formatDiagnosticsAge(diagnostics.lastGnssUpdateAt)),
+            getString(R.string.telemetry_diagnostics_sample_line, formatDiagnosticsAge(diagnostics.lastSampleAttemptAt)),
+            getString(R.string.telemetry_diagnostics_skip_line, lastSkip),
+        ).joinToString("\n")
+    }
+
+    private fun formatDiagnosticsAge(timestamp: Instant?): String {
+        val instant = timestamp ?: return getString(R.string.telemetry_diagnostics_never)
+        val seconds = Duration.between(instant, Instant.now()).seconds.coerceAtLeast(0L)
+        return when {
+            seconds < 60L -> getString(R.string.telemetry_diagnostics_seconds_ago, seconds)
+            seconds < 3_600L -> getString(R.string.telemetry_diagnostics_minutes_ago, seconds / 60L)
+            else -> getString(R.string.telemetry_diagnostics_hours_ago, seconds / 3_600L)
+        }
+    }
 
     private fun showReportingEndpointDialog() {
         val input = EditText(this).apply {

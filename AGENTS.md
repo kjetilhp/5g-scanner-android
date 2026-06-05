@@ -88,6 +88,8 @@ The current prototype uses a foreground `ScannerService` with mock radio/GNSS so
 
 Telemetry source selection goes through `TelemetrySourceFactory`. The About screen includes a Developer `Mock telemetry` toggle that defaults on for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. Turning it off on a physical device routes through Android collector classes behind the same `RadioTelemetrySource` and `GnssTelemetrySource` interfaces; the Android radio source uses TelephonyCallback on API 31+ and PhoneStateListener/requestCellInfoUpdate on API 29-30, while the Android GNSS source uses LocationManager with adaptive low/balanced/high request tiers based on movement speed. Radio callbacks update latest state and may request a debounced near-term scanner tick, but samples are still assembled by pairing latest radio with latest acceptable GNSS. The scanner UI should indicate active mock telemetry with a subtle `MOCK` badge.
 
+The About -> Developer section also has a compact telemetry diagnostics row for field testing. Keep this row read-only and practical: source type, started/waiting state, radio source count, radio/GNSS update ages, current GNSS tier where available, and the latest sample skip reason.
+
 ## Product Notes
 
 Keep the first usable UI small:

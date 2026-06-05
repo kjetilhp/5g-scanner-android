@@ -5,7 +5,10 @@ import no.politiet.pit.domain.Signal
 import java.time.Instant
 
 class MockRadioTelemetrySource : RadioTelemetrySource {
+    private var latestUpdateAt: Instant? = null
+
     override fun latest(sampleNumber: Int, capturedAt: Instant): RadioTelemetry {
+        latestUpdateAt = capturedAt
         val wave = sampleNumber % 6
         val rsrpValues = intArrayOf(-113, -100, -88, -96, -109, -84)
         val rsrqValues = intArrayOf(-19, -15, -9, -12, -18, -8)
@@ -31,4 +34,10 @@ class MockRadioTelemetrySource : RadioTelemetrySource {
             ),
         )
     }
+
+    override fun diagnostics(): RadioSourceDiagnostics =
+        RadioSourceDiagnostics(
+            sourceCount = 1,
+            latestUpdateAt = latestUpdateAt,
+        )
 }

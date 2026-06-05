@@ -61,6 +61,7 @@ class ScannerService : Service() {
     private var mockTelemetryEnabled = AppConfig.Defaults.mockTelemetryEnabled
     private var enhancedPrivacyEnabled = AppConfig.Defaults.enhancedPrivacyEnabled
     private var effectiveMockTelemetry = AppConfig.Defaults.mockTelemetryEnabled
+    private var lastSampleSkipReason: String? = null
 
     private val sampler = object : Runnable {
         override fun run() {
@@ -201,6 +202,7 @@ class ScannerService : Service() {
         radioTelemetrySource.start(::requestSampleSoonForRadioEvent)
         gnssTelemetrySource.start(gnssMode)
         telemetrySourcesStarted = true
+        Log.i(TAG, "Telemetry sources started: source=${if (effectiveMockTelemetry) "mock" else "android"}, gnssMode=${gnssMode.name}")
     }
 
     private fun stopTelemetrySources() {
@@ -246,7 +248,15 @@ class ScannerService : Service() {
         val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode)
         val radioTelemetry = radioTelemetrySource.latestAll(sampleCount, capturedAt)
         if (radioTelemetry.isEmpty() || gnssTelemetry == null) {
-            Log.d(TAG, "Skipped sample: sampleNumber=$sampleCount, radioSnapshots=${radioTelemetry.size}, hasGnss=${gnssTelemetry != null}")
+            lastSampleSkipReason = when {
+                radioTelemetry.isEmpty() && gnssTelemetry == null -> "no_radio_or_usable_gnss"
+                radioTelemetry.isEmpty() -> "no_radio_snapshot"
+                else -> "no_usable_gnss"
+            }
+            Log.d(
+                TAG,
+                "Skipped sample: sampleNumber=$sampleCount, reason=$lastSampleSkipReason, radioSnapshots=${radioTelemetry.size}, hasGnss=${gnssTelemetry != null}",
+            )
             publishState()
             return
         }
@@ -263,7 +273,10 @@ class ScannerService : Service() {
         if (!scannerDesired() || scannerErrorReason() != null) return
         loadSettings()
         val capturedAt = Instant.now()
-        val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode) ?: return
+        val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode) ?: run {
+            Log.d(TAG, "GNSS refresh skipped: no usable fix")
+            return
+        }
         latestTelemetry = ScannerTelemetrySnapshot(
             radio = latestTelemetry.radio,
             gnss = gnssTelemetry,
@@ -281,10 +294,12 @@ class ScannerService : Service() {
             val sample = when (assemblyResult) {
                 is AssemblyResult.Accepted -> assemblyResult.sample
                 is AssemblyResult.Rejected -> {
+                    lastSampleSkipReason = assemblyResult.reason
                     Log.d(TAG, "Skipped coverage sample: sampleNumber=$sampleNumber, reason=${assemblyResult.reason}")
                     return@runCatching
                 }
             }
+            lastSampleSkipReason = null
             val storedSample = if (enhancedPrivacyEnabled) {
                 CoverageSampleEnhancedPrivacyTransformer.reduce(sample)
             } else {
@@ -374,6 +389,7 @@ class ScannerService : Service() {
             mockTelemetryActive = effectiveMockTelemetry,
             sampleCount = sampleCount,
             latestTelemetry = latestTelemetry,
+            diagnostics = diagnostics(),
         )
         updateForegroundNotification(errorReason)
         sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
@@ -382,6 +398,21 @@ class ScannerService : Service() {
     private fun publishStoppedState() {
         currentState = currentState.copy(status = ScannerStatus.STOPPED, errorReason = null)
         sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
+    }
+
+    private fun diagnostics(): Diagnostics {
+        val radioDiagnostics = radioTelemetrySource.diagnostics()
+        val gnssDiagnostics = gnssTelemetrySource.diagnostics()
+        return Diagnostics(
+            telemetrySource = if (effectiveMockTelemetry) "mock" else "android",
+            telemetrySourcesStarted = telemetrySourcesStarted,
+            radioSourceCount = radioDiagnostics.sourceCount,
+            lastRadioUpdateAt = radioDiagnostics.latestUpdateAt,
+            gnssTier = gnssDiagnostics.activeTier,
+            lastGnssUpdateAt = gnssDiagnostics.latestUpdateAt,
+            lastSampleAttemptAt = lastSampleAttemptAt,
+            lastSampleSkipReason = lastSampleSkipReason,
+        )
     }
 
     private fun scannerNotification(): Notification {
@@ -438,9 +469,35 @@ class ScannerService : Service() {
         val mockTelemetryActive: Boolean,
         val sampleCount: Int,
         val latestTelemetry: ScannerTelemetrySnapshot,
+        val diagnostics: Diagnostics,
     ) {
         val isRunning: Boolean
             get() = status != ScannerStatus.STOPPED
+    }
+
+    data class Diagnostics(
+        val telemetrySource: String,
+        val telemetrySourcesStarted: Boolean,
+        val radioSourceCount: Int,
+        val lastRadioUpdateAt: Instant?,
+        val gnssTier: String?,
+        val lastGnssUpdateAt: Instant?,
+        val lastSampleAttemptAt: Instant?,
+        val lastSampleSkipReason: String?,
+    ) {
+        companion object {
+            fun initial(): Diagnostics =
+                Diagnostics(
+                    telemetrySource = "mock",
+                    telemetrySourcesStarted = false,
+                    radioSourceCount = 0,
+                    lastRadioUpdateAt = null,
+                    gnssTier = null,
+                    lastGnssUpdateAt = null,
+                    lastSampleAttemptAt = null,
+                    lastSampleSkipReason = null,
+                )
+        }
     }
 
     companion object {
@@ -462,6 +519,7 @@ class ScannerService : Service() {
             mockTelemetryActive = true,
             sampleCount = 0,
             latestTelemetry = ScannerTelemetrySnapshot.initial(AppConfig.Defaults.gnssMode),
+            diagnostics = Diagnostics.initial(),
         )
             private set
 

@@ -163,6 +163,8 @@ Running scanning is owned by `ScannerService`, a foreground service with a visib
 
 The About screen includes a small Developer section with a `Mock telemetry` toggle. It defaults to enabled so emulator development keeps using simulator-friendly radio/GNSS samples. Emulators always force mock telemetry even if the saved toggle is off. Turning it off on a physical device routes the scanner through the Android source classes and requires phone state permission for radio callbacks. The main scanner screen shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
+The same Developer section includes a compact telemetry diagnostics row for field testing. It shows whether mock or Android telemetry is active, whether telemetry sources are started, the active radio source count, last radio/GNSS update ages, the current GNSS request tier when exposed by the source, and the latest sample skip reason.
+
 ## Location Mode and Quality
 
 Location mode controls the starting aggressiveness for Android GNSS/location requests, and movement speed can adapt the active request tier: low power while stationary, balanced while moving slowly, and high accuracy while driving. It does not lower the quality bar for recorded coverage samples.
