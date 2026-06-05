@@ -14,6 +14,7 @@
     <string name="no_data">Scanner not running</string>
     <string name="cannot_start_scanning">Cannot start scanning: %1$s</string>
     <string name="scanner_error_missing_location_permission">Missing location permission</string>
+    <string name="scanner_error_missing_phone_permission">Missing phone state permission</string>
     <string name="scanner_error_missing_notification_permission">Missing notification permission</string>
     <string name="scanner_error_location_disabled">Location is off</string>
     <string name="scanner_error_airplane_mode">Airplane mode is on</string>

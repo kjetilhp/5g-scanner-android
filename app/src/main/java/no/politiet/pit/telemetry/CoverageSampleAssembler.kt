@@ -56,12 +56,12 @@ object CoverageSampleAssembler {
             return "gnss_hdop_too_high hdop=${gnss.fix.hdop} maxHdop=${thresholds.maxHdop}"
         }
 
-        val snapshotAgeSeconds = Duration
+        val snapshotAgeSeconds = kotlin.math.abs(Duration
             .between(gnss.receivedAt, radio.receivedAt)
             .seconds
-            .coerceAtLeast(0L)
+        )
         if (snapshotAgeSeconds > thresholds.maxSnapshotAgeSeconds) {
-            return "gnss_snapshot_too_old snapshotAgeSeconds=$snapshotAgeSeconds maxSnapshotAgeSeconds=${thresholds.maxSnapshotAgeSeconds}"
+            return "telemetry_snapshots_too_far_apart snapshotAgeSeconds=$snapshotAgeSeconds maxSnapshotAgeSeconds=${thresholds.maxSnapshotAgeSeconds}"
         }
 
         return null

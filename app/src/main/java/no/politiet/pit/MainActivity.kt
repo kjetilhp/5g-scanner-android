@@ -1146,6 +1146,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val hasLocationPermission = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!hasLocationPermission) return false
+        if (requiresPhoneStatePermission() &&
+            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -1271,6 +1276,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun ScannerErrorReason.settingsIntent(): Intent? =
         when (this) {
             is ScannerErrorReason.MissingLocationPermission,
+            is ScannerErrorReason.MissingPhoneStatePermission,
             is ScannerErrorReason.MissingNotificationPermission -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", packageName, null)
             }
@@ -1284,6 +1290,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!locationPermissionGranted) {
             return ScannerAvailability.Error(ScannerErrorReason.MissingLocationPermission(getString(R.string.scanner_error_missing_location_permission)))
+        }
+
+        if (requiresPhoneStatePermission() &&
+            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return ScannerAvailability.Error(ScannerErrorReason.MissingPhoneStatePermission(getString(R.string.scanner_error_missing_phone_permission)))
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -1325,10 +1337,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         buildList {
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (requiresPhoneStatePermission()) {
+                add(Manifest.permission.READ_PHONE_STATE)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+
+    private fun requiresPhoneStatePermission(): Boolean =
+        !mockTelemetryEnabled && !DeviceProfile.isLikelyEmulator()
 
     private fun syncScannerStateFromService(animateBars: Boolean) {
         val state = ScannerService.currentState
@@ -3337,6 +3355,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private sealed class ScannerErrorReason(val message: String) {
         class MissingLocationPermission(message: String) : ScannerErrorReason(message)
+        class MissingPhoneStatePermission(message: String) : ScannerErrorReason(message)
         class MissingNotificationPermission(message: String) : ScannerErrorReason(message)
         class LocationDisabled(message: String) : ScannerErrorReason(message)
         class AirplaneModeEnabled(message: String) : ScannerErrorReason(message)

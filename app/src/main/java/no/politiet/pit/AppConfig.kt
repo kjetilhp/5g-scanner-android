@@ -15,6 +15,7 @@ object AppConfig {
 
     object Scanner {
         const val sampleIntervalMs: Long = 5_000L
+        const val radioEventSampleMinSpacingMs: Long = 2_000L
         const val errorRecheckIntervalMs: Long = 5_000L
         const val maxStationaryFixAgeSeconds: Int = 30
         const val maxSlowFixAgeSeconds: Int = 10

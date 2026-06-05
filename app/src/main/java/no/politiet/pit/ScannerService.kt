@@ -53,6 +53,8 @@ class ScannerService : Service() {
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(AppConfig.Defaults.gnssMode)
     private var sampleScheduled = false
     private var gnssRefreshScheduled = false
+    private var telemetrySourcesStarted = false
+    private var lastSampleAttemptAt: Instant? = null
     private var gnssMode = AppConfig.Defaults.gnssMode
     private var telemetryGnssMode = AppConfig.Defaults.gnssMode
     private var reportingMode = AppConfig.Defaults.reportingMode
@@ -66,6 +68,7 @@ class ScannerService : Service() {
             if (!scannerDesired()) {
                 stopScannerService()
             } else if (scannerErrorReason() == null) {
+                startTelemetrySources()
                 captureSample()
                 scheduleNextSample(AppConfig.Scanner.sampleIntervalMs)
             } else {
@@ -114,6 +117,7 @@ class ScannerService : Service() {
         handler.removeCallbacks(gnssRefresh)
         sampleScheduled = false
         gnssRefreshScheduled = false
+        stopTelemetrySources()
         publishStoppedState()
         super.onDestroy()
     }
@@ -133,6 +137,9 @@ class ScannerService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         publishState()
+        if (scannerErrorReason() == null) {
+            startTelemetrySources()
+        }
         scheduleNextSample(0L)
         scheduleGnssRefresh(gnssRefreshIntervalMs())
         Log.i(TAG, "Scanner service started: gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
@@ -143,6 +150,7 @@ class ScannerService : Service() {
         handler.removeCallbacks(gnssRefresh)
         sampleScheduled = false
         gnssRefreshScheduled = false
+        stopTelemetrySources()
         publishStoppedState()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -170,11 +178,32 @@ class ScannerService : Service() {
     }
 
     private fun configureTelemetrySources(useMockTelemetry: Boolean) {
+        val shouldRestartSources = telemetrySourcesStarted
+        if (shouldRestartSources) {
+            stopTelemetrySources()
+        }
         val sources = TelemetrySourceFactory.create(this, useMockTelemetry)
         radioTelemetrySource = sources.radio
         gnssTelemetrySource = sources.gnss
         effectiveMockTelemetry = useMockTelemetry
+        if (shouldRestartSources) {
+            startTelemetrySources()
+        }
         Log.i(TAG, "Telemetry sources configured: ${if (useMockTelemetry) "mock" else "android"}")
+    }
+
+    private fun startTelemetrySources() {
+        if (telemetrySourcesStarted) return
+        radioTelemetrySource.start(::requestSampleSoonForRadioEvent)
+        gnssTelemetrySource.start()
+        telemetrySourcesStarted = true
+    }
+
+    private fun stopTelemetrySources() {
+        if (!telemetrySourcesStarted) return
+        radioTelemetrySource.stop()
+        gnssTelemetrySource.stop()
+        telemetrySourcesStarted = false
     }
 
     private fun scannerDesired(): Boolean {
@@ -188,6 +217,11 @@ class ScannerService : Service() {
             checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!hasLocationPermission) return getString(R.string.scanner_error_missing_location_permission)
+        if (!effectiveMockTelemetry &&
+            checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return getString(R.string.scanner_error_missing_phone_permission)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -204,16 +238,19 @@ class ScannerService : Service() {
         loadSettings()
         sampleCount += 1
         val capturedAt = Instant.now()
-        val radioTelemetry = radioTelemetrySource.latest(sampleCount, capturedAt)
+        lastSampleAttemptAt = capturedAt
         val gnssTelemetry = gnssTelemetrySource.latest(sampleCount, capturedAt, gnssMode)
-        if (radioTelemetry == null || gnssTelemetry == null) {
-            Log.d(TAG, "Skipped sample: sampleNumber=$sampleCount, hasRadio=${radioTelemetry != null}, hasGnss=${gnssTelemetry != null}")
+        val radioTelemetry = radioTelemetrySource.latestAll(sampleCount, capturedAt)
+        if (radioTelemetry.isEmpty() || gnssTelemetry == null) {
+            Log.d(TAG, "Skipped sample: sampleNumber=$sampleCount, radioSnapshots=${radioTelemetry.size}, hasGnss=${gnssTelemetry != null}")
             publishState()
             return
         }
 
-        latestTelemetry = ScannerTelemetrySnapshot(radioTelemetry, gnssTelemetry)
-        writeCoverageSample(sampleCount, capturedAt, latestTelemetry)
+        latestTelemetry = ScannerTelemetrySnapshot(radioTelemetry.first(), gnssTelemetry)
+        radioTelemetry.forEach { radio ->
+            writeCoverageSample(sampleCount, capturedAt, ScannerTelemetrySnapshot(radio, gnssTelemetry))
+        }
         triggerContinuousReporting()
         publishState()
     }
@@ -294,6 +331,22 @@ class ScannerService : Service() {
         if (sampleScheduled) return
         sampleScheduled = true
         handler.postDelayed(sampler, delayMs)
+    }
+
+    private fun requestSampleSoonForRadioEvent() {
+        if (!scannerDesired() || scannerErrorReason() != null) return
+        val now = Instant.now()
+        val delayMs = lastSampleAttemptAt
+            ?.let { lastAttempt ->
+                AppConfig.Scanner.radioEventSampleMinSpacingMs -
+                    java.time.Duration.between(lastAttempt, now).toMillis()
+            }
+            ?.coerceAtLeast(0L)
+            ?: 0L
+        handler.removeCallbacks(sampler)
+        sampleScheduled = true
+        handler.postDelayed(sampler, delayMs)
+        Log.d(TAG, "Radio event requested sample: delayMs=$delayMs")
     }
 
     private fun scheduleGnssRefresh(delayMs: Long) {

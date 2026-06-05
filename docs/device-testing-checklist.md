@@ -18,12 +18,14 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - After permissions are granted, scanning starts when the scanner toggle is running.
 - Mock telemetry badge appears on emulator.
 - On a physical device, mock telemetry can be disabled from About.
+- Disabling mock telemetry requests phone state permission if it has not already been granted.
 
 ## Scanning State
 
 - Stop scanning from the main screen.
 - Relaunch the app and confirm scanning remains stopped.
 - Start scanning again and confirm sample count increases.
+- With mock telemetry disabled on a physical device, confirm logcat shows Android radio telemetry registration and LTE/NR serving-cell updates when the device exposes them.
 - Turn location off and confirm the app shows an error state instead of silently stopping.
 - Turn location back on and confirm scanning can resume.
 - Enable airplane mode and confirm the app shows an error state.
@@ -73,5 +75,6 @@ Use this before moving from emulator/mock testing into physical-device field tes
 ## Known Prototype Limits
 
 - Automatic scanner restart after reboot is not fully enabled yet for physical-device field use.
-- Real Android radio/GNSS collectors are still placeholders until mock telemetry is disabled and collector work begins.
+- Android radio collection has a first LTE/NR serving-cell implementation, but still needs real-device validation across phone models, carriers, SIM states, NSA/SA behavior, and screen-off conditions.
+- Android GNSS/location collection is still a placeholder, so physical-device non-mock sampling will not persist accepted coverage samples until GNSS wiring lands.
 - Cleartext HTTP is enabled for the prototype endpoint and should be replaced by TLS before production use.

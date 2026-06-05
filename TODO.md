@@ -23,3 +23,4 @@ Keep this file practical: near-term tasks, open product questions, and parked id
 - Discuss better running/running(error) visualizations: can it be shown in the device toolbar? can we have animation? ux?
 Add a stopped (not running) viz to make it clearer without having to open the app? App notification (dot on app icon) is still purple, not ideal, you said "green accent" what causes this, can we remedy it
 
+Two or more SIMs: sampler should collect all usable active subscriptions; later UI should show which SIM/subscription is displayed and possibly allow swipe left/right between them.
