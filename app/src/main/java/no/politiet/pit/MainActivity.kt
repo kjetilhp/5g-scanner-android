@@ -6,6 +6,8 @@ import android.animation.AnimatorSet
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.pm.PackageManager
@@ -1056,10 +1058,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ensureSamplerState()
                 render()
             },
-            settingsInfoRow(
+            settingsActionRow(
                 title = getString(R.string.setting_telemetry_diagnostics_title),
                 summary = telemetryDiagnosticsSummary(),
-            ),
+            ) {
+                copyTelemetryDiagnostics()
+            },
         ))
 
         return settingsScreen(
@@ -2161,6 +2165,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             getString(R.string.telemetry_diagnostics_sample_line, formatDiagnosticsAge(diagnostics.lastSampleAttemptAt)),
             getString(R.string.telemetry_diagnostics_skip_line, lastSkip),
         ).joinToString("\n")
+    }
+
+    private fun copyTelemetryDiagnostics() {
+        val text = telemetryDiagnosticsSummary()
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.setting_telemetry_diagnostics_title), text))
+        Toast.makeText(this, R.string.telemetry_diagnostics_copied, Toast.LENGTH_SHORT).show()
     }
 
     private fun formatDiagnosticsAge(timestamp: Instant?): String {

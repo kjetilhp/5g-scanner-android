@@ -1,6 +1,6 @@
 # Device Testing Checklist
 
-Use this before moving from emulator/mock testing into physical-device field testing. Keep notes in `TODO.md` or a short dated test note when something behaves differently from expected.
+Use this before moving from emulator/mock testing into physical-device field testing. Copy `docs/field-test-note-template.md` into a short dated note when recording a physical-device test.
 
 ## Before Installing
 
