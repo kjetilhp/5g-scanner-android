@@ -6,7 +6,7 @@ The app should be built around informed, reversible participation. The user is h
 
 - Consent must be explicit before scanning begins
 - Android permissions must be requested only with context
-- Revoking consent must stop scanning
+- A future in-app consent revocation action must stop scanning
 - Permission revocation must be handled gracefully
 - Reporting behavior must not be added or changed silently
 - Local coverage samples should be deletable by the user
@@ -27,7 +27,7 @@ Android permissions:
 
 The app can scan only when both consent and required permissions are present.
 
-## Suggested Consent State
+## Suggested Future Consent State
 
 ```text
 NotAsked
@@ -73,6 +73,8 @@ Material reporting changes should require:
 - Clear retention/deletion story
 
 ## Revocation Behavior
+
+The current prototype has a blocking first-run consent gate, but no in-app revoke-consent action after consent is granted. Today, participation can be paused by stopping scanning and can be stopped entirely by uninstalling the app. The behavior below is the target for a future revoke action.
 
 When consent is revoked:
 

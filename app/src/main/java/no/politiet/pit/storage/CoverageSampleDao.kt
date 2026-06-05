@@ -136,6 +136,26 @@ interface CoverageSampleDao {
 
     @Query(
         """
+        UPDATE coverage_samples
+        SET upload_status = :failedStatus,
+            last_upload_error = :lastError
+        WHERE upload_status = :inFlightStatus
+            AND upload_batch_id IN (
+                SELECT id FROM reporting_batches
+                WHERE status = :failedBatchStatus
+                    AND last_error = :lastError
+            )
+        """,
+    )
+    fun recoverSamplesForStaleInFlightBatches(
+        lastError: String,
+        inFlightStatus: String = CoverageSampleEntity.UploadStatusInFlight,
+        failedStatus: String = CoverageSampleEntity.UploadStatusFailed,
+        failedBatchStatus: String = ReportingBatchEntity.StatusFailed,
+    ): Int
+
+    @Query(
+        """
         SELECT COUNT(*) FROM coverage_samples
         WHERE upload_status != :uploadedStatus
         """,

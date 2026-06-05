@@ -31,7 +31,7 @@ domain/     Plain Kotlin modes and future scanner contract models
 encoding/   JSONL/sample encoders that can be tested away from Android UI
 telemetry/  Radio/GNSS source interfaces, mock sources, Android sources, and sample assembly
 storage/    App preferences, coverage database persistence, and CSV export
-reporting/  Alarm receivers and reporting scheduler
+reporting/  Alarm receivers, reporting scheduler, transport, validation, and retry/recovery helpers
 ScannerService.kt  Foreground active scanner loop and sample writer
 ```
 
@@ -64,7 +64,7 @@ Treat the user's scanner toggle as desired state, not merely as "a service is cu
 - Temporary errors such as flight mode, location disabled, or revoked runtime permissions should pause usable sample production, not erase the user's intent to scan.
 - While in error, the scanner should keep enough app/service state to report why samples are not being produced.
 - When the phone returns to a working condition, such as flight mode off, location enabled, or permissions restored, scanning should resume automatically when Android allows it.
-- Samples should still be skipped rather than logged when radio or GNSS data is missing, stale, or unusable.
+- Samples should still be skipped rather than recorded when radio or GNSS data is missing, stale, or unusable.
 
 The implementation path should separate three concepts:
 
@@ -83,7 +83,13 @@ The foreground service should not immediately stop just because a temporary erro
 
 Some states remain outside normal resilience: user force-stop, uninstall, app update/reinstall, process death without restart allowance, and reboot. Reboot auto-resume should be treated separately because modern Android may require background-location permission and stronger consent language.
 
-The boot receiver currently only restores reporting alarms. It does not restart active scanning after reboot. Auto-resuming scanner location collection from boot should be treated as a separate product/privacy decision because it may require background-location permission and stronger consent language on modern Android.
+The boot receiver currently restores reporting alarms from saved preferences. It does not restart active scanning after reboot. Auto-resuming scanner location collection from boot should be treated as a separate product/privacy decision because it may require background-location permission and stronger consent language on modern Android.
+
+## Reporting Resilience
+
+Reporting is local-first. Samples are written to Room first, then claimed into capped JSONL batches for scheduled, manual, or continuous reporting. Batch size is bounded by `AppConfig.Reporting.maxSamplesPerBatch` and `maxBatchBytes`; a single reporting trigger is also bounded by `maxBatchesPerDrain` so a stuck sender cannot monopolize the database executor.
+
+The reporting state model uses sample upload statuses plus `reporting_batches`. Failed batches keep their samples queued for retry and use the configured backoff. If a process dies during an upload attempt, a later reporting trigger recovers stale `in_flight` batches whose next-attempt time has passed by marking the batch and samples failed with a recoverable interruption message, then the normal retry path owns the next send.
 
 ## GNSS Usability Strategy
 
@@ -128,7 +134,7 @@ The mock GNSS source uses separate latest-reported and latest-usable snapshots. 
 
 ## Deferred Decisions
 
-- Upload/sync behavior
+- Production reporting destination, TLS policy, and server retention behavior
 - Account identity, if any
 - Data retention defaults
 - Exact location provider choice

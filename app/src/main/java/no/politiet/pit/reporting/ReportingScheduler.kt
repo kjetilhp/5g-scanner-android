@@ -262,6 +262,7 @@ object ReportingScheduler {
         val batchDao = db.reportingBatchDao()
         val now = Instant.now()
         val nowEpochMillis = now.toEpochMilli()
+        recoverStaleInFlightBatches(db, nowEpochMillis)
         val unresolvedStatuses = listOf(ReportingBatchEntity.StatusFailed, ReportingBatchEntity.StatusInFlight)
         val unresolvedBatch = batchDao.oldestBatch(unresolvedStatuses)
         val batchAndSamples = if (unresolvedBatch != null) {
@@ -409,6 +410,24 @@ object ReportingScheduler {
             claimed = batch to selected
         }
         return claimed
+    }
+
+    private fun recoverStaleInFlightBatches(db: CoverageDatabase, nowEpochMillis: Long) {
+        db.runInTransaction {
+            val recoveredBatches = db.reportingBatchDao().recoverStaleInFlight(
+                nowEpochMillis = nowEpochMillis,
+                lastError = ReportingRecovery.StaleInFlightError,
+            )
+            if (recoveredBatches > 0) {
+                val recoveredSamples = db.coverageSampleDao().recoverSamplesForStaleInFlightBatches(
+                    lastError = ReportingRecovery.StaleInFlightError,
+                )
+                Log.i(
+                    TAG,
+                    "Recovered stale in-flight reporting batches: batches=$recoveredBatches, samples=$recoveredSamples",
+                )
+            }
+        }
     }
 
     private fun selectBatchSamples(samples: List<CoverageSampleEntity>): List<CoverageSampleEntity> {

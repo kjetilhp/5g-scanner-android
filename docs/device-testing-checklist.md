@@ -5,8 +5,8 @@ Use this before moving from emulator/mock testing into physical-device field tes
 ## Before Installing
 
 - Confirm the backend is reachable from the target device.
-- For emulator testing, use `AppConfig.Reporting.emulatorHostEndpointUrl`.
-- For physical-device testing, set `AppConfig.Reporting.physicalDeviceEndpointUrl` to a URL the phone can reach, then point `AppConfig.Reporting.endpointUrl` at it.
+- For emulator testing, use About -> Developer -> Reporting endpoint with `AppConfig.Reporting.emulatorHostEndpointUrl`.
+- For physical-device testing, use About -> Developer -> Reporting endpoint with a URL the phone can reach, such as the host PC's LAN IP.
 - Run `.\gradlew.bat testDebugUnitTest`.
 - Run `.\gradlew.bat assembleDebug`.
 - Install a fresh debug APK.
@@ -44,7 +44,8 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - Confirm the UI shows a short human-readable error.
 - Confirm logcat includes HTTP request/response details for the failed request.
 - Restart the backend and confirm a later manual or scheduled send succeeds.
-- Continuous mode reports pending samples after sample writes and drains all pending batches.
+- Continuous mode reports pending samples after sample writes and drains pending batches up to the configured per-trigger cap.
+- If the app is killed during an upload, confirm a later reporting trigger recovers the stale in-flight batch and retries it.
 
 ## Recorded Coverage Data
 
@@ -72,6 +73,7 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - Relaunch the app and confirm settings persist.
 - Force-stop and reopen the app; confirm scanner intent/settings are preserved.
 - Reboot the device; confirm reporting schedule is restored after launch/boot where Android allows it.
+- Reboot the device; confirm active scanning does not auto-restart before the app is launched.
 - Confirm active scanning uses a foreground notification.
 - Confirm notification text changes when scanning needs attention.
 

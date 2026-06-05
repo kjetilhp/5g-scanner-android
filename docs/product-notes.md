@@ -27,7 +27,7 @@ The first-run flow should explain in plain language:
 - What is collected: location, timestamps, cellular/network metrics, and relevant device/network metadata
 - Why it is collected: voluntary crowdsourced coverage mapping
 - Where it goes: local device storage first, with periodic reporting according to the user's reporting setting
-- How reporting is controlled: Hourly, Daily, Continuous, Manual, and Send now
+- How reporting is controlled: Every 15 minutes, Hourly, Daily, Continuous, Manual, and Send now
 - How the user can stop scanning for off hours or battery conservation, and how participation can stop entirely
 
 Consent should be tracked by the app separately from Android OS permission grants.
@@ -53,7 +53,7 @@ Settings should favor a small number of understandable controls:
 - Location/GNSS behavior
 - Reporting mode and last sent status
 - Recorded coverage data inspector with CSV export
-- Consent and permission management
+- Consent and permission status, with in-app revocation deferred until the consent model is expanded
 - Local data deletion
 
 Sampling frequency should not be user-configurable until changing it would reliably change real collection behavior across supported phones. The prototype should use a fixed internal cadence.

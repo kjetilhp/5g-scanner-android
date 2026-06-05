@@ -51,6 +51,7 @@ object AppConfig {
         const val contentType: String = "application/x-ndjson"
         const val maxSamplesPerBatch: Int = 1_000
         const val maxBatchBytes: Int = 2 * 1024 * 1024
+        const val maxBatchesPerDrain: Int = 100
         val retryBackoff: List<Duration> = listOf(
             Duration.ofMinutes(1),
             Duration.ofMinutes(5),

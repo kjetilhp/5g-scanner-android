@@ -10,7 +10,7 @@ external/node-scanner/
 
 ## Format
 
-Logs are append-only JSON Lines:
+The reference output is append-only JSON Lines:
 
 ```text
 one CoverageSample JSON object per line

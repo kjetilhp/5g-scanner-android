@@ -64,6 +64,23 @@ interface ReportingBatchDao {
 
     @Query(
         """
+        UPDATE reporting_batches
+        SET status = :failedStatus,
+            last_error = :lastError
+        WHERE status = :inFlightStatus
+            AND next_attempt_at_epoch_millis IS NOT NULL
+            AND next_attempt_at_epoch_millis <= :nowEpochMillis
+        """,
+    )
+    fun recoverStaleInFlight(
+        nowEpochMillis: Long,
+        lastError: String,
+        inFlightStatus: String = ReportingBatchEntity.StatusInFlight,
+        failedStatus: String = ReportingBatchEntity.StatusFailed,
+    ): Int
+
+    @Query(
+        """
         SELECT COUNT(*) FROM reporting_batches
         WHERE status = :status
         """,

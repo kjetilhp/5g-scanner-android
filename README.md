@@ -12,7 +12,7 @@ Planning and project setup plus a simulator-friendly Android scanner prototype.
 
 The product direction is a consent-led background coverage collector. Most users should only need to grant consent, keep the app installed, and stop scanning when they are off duty or want to save battery. Engineers can inspect recorded samples and tune settings, but the app should stay simple for voluntary crowdsourced participation.
 
-Storage is local-first, with reporting controlled by the app's reporting setting. Reporting currently builds capped JSONL batches from queued rows and posts them to the configured reporting endpoint.
+Storage is local-first, with reporting controlled by the app's reporting setting. Reporting currently builds capped JSONL batches from queued rows, posts them to the configured reporting endpoint, retries failures with backoff, and recovers interrupted in-flight sends on later reporting triggers.
 
 ## Terminology
 
@@ -68,17 +68,17 @@ Only `app/` exists right now. The other modules can be added when the scanner lo
 
 ## Android Prototype
 
-The current Android app is intentionally tiny:
+The current Android app is intentionally small and still uses a single Gradle `app` module:
 
 ```text
 settings.gradle.kts
 build.gradle.kts
 app/build.gradle.kts
 app/src/main/AndroidManifest.xml
-app/src/main/java/no/politiet/pit/MainActivity.kt
+app/src/main/java/no/politiet/pit/
 ```
 
-It uses a single native Android `Activity` and avoids Compose. AndroidX Room is included for local sample persistence; CSV is the user-facing export format. Android Studio can open the project and sync Gradle.
+It uses a single native Android `Activity` and avoids Compose. Scanner service work, telemetry sources, storage, reporting, encoding, and domain helpers are split into Kotlin packages inside the app module. AndroidX Room is included for local sample persistence; CSV is the user-facing export format. Android Studio can open the project and sync Gradle.
 
 The app compiles and targets Android 16/API 36. The minimum supported Android version is Android 10/API 29, matching the first public Android API level with 5G NR telephony classes and the intended modern 5G device fleet.
 
@@ -155,7 +155,7 @@ The sample model needs a compatibility review before adding more metadata to JSO
 
 Runtime defaults and tuning values that are natural to adjust during development live in `app/src/main/java/no/politiet/pit/AppConfig.kt`. This includes settings defaults, scanner cadence, GNSS quality gates, enhanced privacy precision, reporting intervals/backoff/batch limits, the reporting endpoint and transport mode, and recorded coverage data display/export limits.
 
-Reporting uses a small `ReportingTransport` boundary. The default prototype endpoint is `https://mock-api-ejkt.onrender.com/api/coverage-samples`, a hosted Render mock for emulator and device testing. For local backend testing, use the Developer `Reporting endpoint` setting in About to point the app at a backend URL reachable from the device, such as `http://10.0.2.2:8080/api/coverage-samples` from the Android emulator or the host PC's LAN IP from a physical phone. The setting verifies that the value is an HTTP(S) URL and that an `OPTIONS` request advertises `POST` support before saving; servers can advertise JSONL support with `Accept-Post: application/x-ndjson`. Cleartext HTTP is enabled until TLS and the real backend endpoint are decided. A mock reporting transport remains available through `AppConfig.Reporting.useMockTransport` for development.
+Reporting uses a small `ReportingTransport` boundary. The default prototype endpoint is `https://mock-api-ejkt.onrender.com/api/coverage-samples`, a hosted Render mock for emulator and device testing. For local backend testing, use the Developer `Reporting endpoint` setting in About to point the app at a backend URL reachable from the device, such as `http://10.0.2.2:8080/api/coverage-samples` from the Android emulator or the host PC's LAN IP from a physical phone. The setting verifies that the value is an HTTP(S) URL and that an `OPTIONS` request advertises `POST` support before saving; servers can advertise JSONL support with `Accept-Post: application/x-ndjson`. Cleartext HTTP is enabled until TLS and the real backend endpoint are decided. A mock reporting transport remains available through `AppConfig.Reporting.useMockTransport` for development. Reporting batches are bounded by sample count, payload size, and a maximum number of batches per drain; stale `in_flight` batches are marked failed with a recoverable error before the next retry.
 
 Enhanced privacy is applied before a sample is stored. It snaps fix timestamps to UTC midnight, snaps coordinates to the configured grid-cell center, coarsens altitude, removes speed and heading, and replaces precise GNSS quality details with configured privacy-mode values.
 
