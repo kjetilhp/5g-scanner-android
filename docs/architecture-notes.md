@@ -61,6 +61,37 @@ The About -> Developer telemetry diagnostics row should stay compact and practic
 
 The scanner loop is a foreground service. While scanning is active, `ScannerService` owns radio ticks, GNSS refreshes, sample assembly, Room/SQLite persistence, and continuous reporting triggers. CSV artifacts are generated from selected database rows for user-facing export. JSONL remains an internal reporting/compatibility contract, not a normal user export. The main UI observes an in-process state snapshot and receives service-state broadcasts while visible; the UI's own GNSS timer only updates the displayed `Ys ago` age and does not collect location. Stopping scanning stops the service and removes its foreground notification.
 
+## Database Schema Versioning
+
+Use SemVer for app releases:
+
+- MAJOR: breaking compatibility after a release/shared baseline exists.
+- MINOR: backward-compatible features or behavior.
+- PATCH: fixes, docs, and polish.
+
+Current development can remain in `0.x` while the app is prototype/private field-test software. The current app version is `0.1.0`; the current Room development baseline is schema version `1`.
+
+Room migrations are a release boundary tool, not a dev-cycle tax. Until the first real release or any shared build with user data worth preserving, the local database schema is a disposable development baseline:
+
+- Keep `CoverageDatabase.version` at `1`.
+- Update entities, DAOs, and indices directly as the baseline changes.
+- Use clean installs or app data clears after schema changes.
+- Do not keep historical migrations for emulator-only/dev-only installs.
+
+Every Room persistence/schema change should still be treated as a checkpoint. Before committing changes that touch entities, DAOs, indices, database version, database provider setup, or persisted settings keys/default semantics, call out the change and decide whether it remains a clean-install dev baseline change or needs a migration step.
+
+After a release/shared build may exist outside the disposable dev environment, freeze that schema as the installed baseline. From then on, breaking database changes should increment the Room version and add an explicit migration. Non-breaking code-only changes should not bump the database version.
+
+Before creating a real release, decide whether the current schema is the release baseline and add migration tests/schema export if we expect to preserve user data across updates.
+
+Keep compatibility buckets separate:
+
+- Room migration decision: local persisted data and settings compatibility.
+- JSONL reporting contract decision: backend/reference scanner compatibility.
+- CSV export contract decision: user/export consumer compatibility.
+
+CSV or JSONL changes do not require a Room migration unless the local stored data shape also changes. They may still require a SemVer note, documentation update, backend coordination, or export-contract communication.
+
 ### Scanner Resilience Target
 
 Treat the user's scanner toggle as desired state, not merely as "a service is currently alive". Once the user has consented and started scanning, the app should be as resilient as Android allows:

@@ -18,7 +18,7 @@ Keep this file practical: near-term tasks, open product questions, and parked id
 
 - Add retention/storage controls if field tests show local database growth is a real issue. Prefer clear user-facing language such as "recorded coverage data limit" over internal cleanup terms.
 
-- Plan and create a migration guard when the app is updated with breaking changes for database etc.
+- Before a release/shared build where updates must preserve user data, add Room migration tests/schema export and freeze that installed schema as the migration baseline.
 
 - Improve scanner state visibility outside the app: foreground notification color/text, stopped/error clarity, and whether the launcher/app notification accent can match the product colors.
 

@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [CoverageSampleEntity::class, ReportingBatchEntity::class],
-    version = 3,
+    version = 1,
     exportSchema = false,
 )
 abstract class CoverageDatabase : RoomDatabase() {

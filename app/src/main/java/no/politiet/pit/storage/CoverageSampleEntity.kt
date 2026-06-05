@@ -15,6 +15,10 @@ import java.time.format.DateTimeFormatter
         Index("captured_date_utc"),
         Index("upload_status"),
         Index("upload_batch_id"),
+        Index(value = ["captured_date_utc", "captured_at_epoch_millis", "id"]),
+        Index(value = ["upload_status", "captured_at_epoch_millis", "id"]),
+        Index(value = ["upload_status", "id"]),
+        Index(value = ["upload_batch_id", "id"]),
     ],
 )
 data class CoverageSampleEntity(

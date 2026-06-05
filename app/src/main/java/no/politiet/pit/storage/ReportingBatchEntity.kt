@@ -10,6 +10,9 @@ import androidx.room.PrimaryKey
     indices = [
         Index("status"),
         Index("next_attempt_at_epoch_millis"),
+        Index(value = ["status", "created_at_epoch_millis"]),
+        Index(value = ["status", "next_attempt_at_epoch_millis"]),
+        Index(value = ["status", "last_attempt_at_epoch_millis"]),
     ],
 )
 data class ReportingBatchEntity(

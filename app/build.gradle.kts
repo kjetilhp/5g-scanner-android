@@ -3,6 +3,8 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val releaseNotesAssetDir = layout.buildDirectory.dir("generated/releaseNotes/assets").get().asFile
+
 android {
     namespace = "no.politiet.pit"
     compileSdk = 36
@@ -23,6 +25,21 @@ android {
     kotlin {
         jvmToolchain(17)
     }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDir(releaseNotesAssetDir)
+        }
+    }
+}
+
+val syncReleaseNotesAsset by tasks.registering(Copy::class) {
+    from(rootProject.file("RELEASE_NOTES.md"))
+    into(releaseNotesAssetDir)
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncReleaseNotesAsset)
 }
 
 dependencies {

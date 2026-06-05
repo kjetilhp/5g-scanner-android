@@ -14,6 +14,10 @@ The product direction is a consent-led background coverage collector. Most users
 
 Storage is local-first, with reporting controlled by the app's reporting setting. Reporting currently builds capped JSONL batches from queued rows, posts them to the configured reporting endpoint, retries failures with backoff, and recovers interrupted in-flight sends on later reporting triggers.
 
+The current prototype version is `0.1.0`. Use SemVer for app releases, but keep compatibility decisions separated: Room migrations protect local persisted data/settings, JSONL contract changes affect reporting/backend compatibility, and CSV changes affect the user-facing export contract. CSV or JSONL changes do not require a Room migration unless the stored local data shape also changes.
+
+Release preparation notes live in [docs/release-process.md](docs/release-process.md). Current release notes live in [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ## Terminology
 
 Use these nouns consistently in user-facing text, code comments, docs, and agent work:

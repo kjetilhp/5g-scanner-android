@@ -903,6 +903,43 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .show()
     }
 
+    private fun showTextDocumentDialog(title: String, body: String) {
+        val textView = TextView(this).apply {
+            text = body
+            textSize = 14f
+            setTextColor(SETTINGS_TEXT)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        val scrollView = ScrollView(this).apply {
+            addView(textView)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scrollView)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showReleaseNotesDialog() {
+        val releaseNotes = runCatching {
+            assets.open(RELEASE_NOTES_ASSET).bufferedReader().use { it.readText() }
+        }.getOrElse { error ->
+            Log.w(TAG, "Release notes asset unavailable", error)
+            getString(R.string.release_notes_unavailable)
+        }
+        showTextDocumentDialog(getString(R.string.setting_release_notes_title), releaseNotes)
+    }
+
+    private fun showCreditsDialog() {
+        showTextDocumentDialog(getString(R.string.setting_credits_title), getString(R.string.credits_placeholder))
+    }
+
+    private fun showLegalDialog() {
+        showTextDocumentDialog(getString(R.string.setting_legal_title), getString(R.string.legal_placeholder))
+    }
+
     private fun shareCoverageCsv(csvFile: java.io.File) {
         val uri = coverageDataStore.exportUri(csvFile)
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -1767,22 +1804,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val endpointDetail = reportingEndpointDetail()
         val telemetryRowSummary = telemetryDiagnosticsRowSummary()
         val telemetryDetails = telemetryDiagnosticsSummary()
+        val appVersion = packageInfoVersionName()
         return listOf(
-            aboutSectionItem("about-intro", getString(R.string.about_intro_title), getString(R.string.about_intro_body)),
-            aboutSectionItem("about-data", getString(R.string.about_data_title), getString(R.string.about_data_body)),
-            aboutSectionItem("about-privacy", getString(R.string.about_privacy_title), getString(R.string.about_privacy_body)),
-            aboutSectionItem("about-storage", getString(R.string.about_storage_title), getString(R.string.about_storage_body)),
-            aboutSectionItem("about-participation", getString(R.string.about_participation_title), getString(R.string.about_participation_body)),
-            aboutSectionItem(
-                "about-app",
-                getString(R.string.about_app_title),
-                getString(
-                    R.string.about_app_body,
-                    packageInfoVersionName(),
-                    packageName,
-                ),
-            ),
-            settingsSectionItem("about-developer-label", getString(R.string.settings_section_developer)),
+            settingsSectionItem("about-developer-label", getString(R.string.settings_section_developer_tools)),
             settingsGroupItem(
                 "about-developer",
                 listOf(
@@ -1795,14 +1819,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ),
             ) {
                 settingsGroup(
-                    settingsPreferenceRow(
-                        title = getString(R.string.setting_reporting_endpoint_title),
-                        summary = getString(R.string.setting_reporting_endpoint_summary),
-                        value = endpointDisplayValue,
-                        detail = endpointDetail,
-                    ) {
-                        showReportingEndpointDialog()
-                    },
+                    telemetryDiagnosticsRow(telemetryRowSummary),
                     settingsToggleRow(
                         title = getString(R.string.setting_mock_telemetry_title),
                         summary = if (DeviceProfile.isLikelyEmulator()) {
@@ -1819,9 +1836,48 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                         ensureSamplerState()
                         render()
                     },
-                    telemetryDiagnosticsRow(telemetryRowSummary),
+                    settingsPreferenceRow(
+                        title = getString(R.string.setting_reporting_endpoint_title),
+                        summary = getString(R.string.setting_reporting_endpoint_summary),
+                        value = endpointDisplayValue,
+                        detail = endpointDetail,
+                    ) {
+                        showReportingEndpointDialog()
+                    },
                 )
             },
+            settingsSectionItem("about-app-label", getString(R.string.settings_section_app_information)),
+            settingsGroupItem("about-app", appVersion) {
+                settingsGroup(
+                    settingsInfoRow(
+                        title = getString(R.string.setting_app_version_title),
+                        summary = getString(R.string.about_app_body, appVersion, packageName),
+                    ),
+                    settingsActionRow(
+                        title = getString(R.string.setting_release_notes_title),
+                        summary = getString(R.string.setting_release_notes_summary),
+                    ) {
+                        showReleaseNotesDialog()
+                    },
+                    settingsActionRow(
+                        title = getString(R.string.setting_credits_title),
+                        summary = getString(R.string.setting_credits_summary),
+                    ) {
+                        showCreditsDialog()
+                    },
+                    settingsActionRow(
+                        title = getString(R.string.setting_legal_title),
+                        summary = getString(R.string.setting_legal_summary),
+                    ) {
+                        showLegalDialog()
+                    },
+                )
+            },
+            aboutSectionItem("about-intro", getString(R.string.about_intro_title), getString(R.string.about_intro_body)),
+            aboutSectionItem("about-data", getString(R.string.about_data_title), getString(R.string.about_data_body)),
+            aboutSectionItem("about-privacy", getString(R.string.about_privacy_title), getString(R.string.about_privacy_body)),
+            aboutSectionItem("about-storage", getString(R.string.about_storage_title), getString(R.string.about_storage_body)),
+            aboutSectionItem("about-participation", getString(R.string.about_participation_title), getString(R.string.about_participation_body)),
         )
     }
 
@@ -3552,5 +3608,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         val SETTINGS_DIVIDER: Int = Color.rgb(226, 229, 231)
         val SETTINGS_RIPPLE: Int = Color.argb(26, 0, 114, 206)
         val PRIVACY_SAMPLE_BACKGROUND: Int = Color.rgb(255, 252, 235)
+        const val RELEASE_NOTES_ASSET: String = "RELEASE_NOTES.md"
     }
 }
