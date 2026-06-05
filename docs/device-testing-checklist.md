@@ -27,7 +27,7 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - Start scanning again and confirm sample count increases.
 - With mock telemetry disabled on a physical device, confirm logcat shows Android radio telemetry registration and LTE/NR serving-cell updates when the device exposes them.
 - With mock telemetry disabled on a physical device, confirm logcat shows Android GNSS request tier changes and location fixes when location is enabled.
-- In About -> Developer, confirm telemetry diagnostics show Android telemetry, started/waiting state, radio source count, radio/GNSS update ages, GNSS tier, and any sample skip reason.
+- In About -> Developer, confirm the telemetry diagnostics row gives a compact status summary and opens a copyable details dialog with Android/mock telemetry, started/waiting state, radio source count, radio/GNSS update ages, GNSS tier, and any sample skip reason.
 - Walk or drive briefly and confirm GNSS request tier moves toward balanced/high when speed increases, then back toward low when stationary.
 - Turn location off and confirm the app shows an error state instead of silently stopping.
 - Turn location back on and confirm scanning can resume.
@@ -51,7 +51,7 @@ Use this before moving from emulator/mock testing into physical-device field tes
 
 - Recorded coverage data summary reads correctly with zero samples.
 - Recorded coverage data summary reads correctly with samples.
-- Delete reported samples leaves queued/unreported samples intact.
+- Clear reported samples leaves queued/unreported samples intact.
 - Delete all clears samples, reporting batches, and exported CSV cache.
 - Export CSV creates a shareable CSV file.
 - Delete exported CSV files appears only when cached export files exist.

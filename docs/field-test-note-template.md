@@ -25,7 +25,13 @@ Copy this into a dated note when testing on a physical device.
 - Consent flow result:
 - Permissions granted:
 - Backend reachable from device:
-- About -> Developer telemetry diagnostics before scanning:
+- About -> Developer telemetry diagnostics row before scanning:
+
+```text
+paste row summary here
+```
+
+- About -> Developer telemetry diagnostics details before scanning:
 
 ```text
 paste diagnostics here
@@ -63,7 +69,13 @@ paste diagnostics here
 
 ## Diagnostics Snapshot
 
-Paste About -> Developer telemetry diagnostics after the main test:
+- About -> Developer telemetry diagnostics row after the main test:
+
+```text
+paste row summary here
+```
+
+- About -> Developer telemetry diagnostics details after the main test:
 
 ```text
 paste diagnostics here

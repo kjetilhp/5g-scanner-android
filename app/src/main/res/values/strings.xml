@@ -42,7 +42,7 @@
     <string name="settings_section_about">About</string>
     <string name="settings_section_developer">Developer</string>
     <string name="setting_about_title">About</string>
-    <string name="setting_about_summary">Version, privacy, and data collection.</string>
+    <string name="setting_about_summary">Privacy, data collection, app version, and developer tools.</string>
     <string name="setting_mock_telemetry_title">Mock telemetry</string>
     <string name="setting_mock_telemetry_summary">Use synthesized data instead of actual radio and GNSS readings.</string>
     <string name="setting_mock_telemetry_emulator_summary">Mock telemetry is always used on emulators.</string>
@@ -55,6 +55,8 @@
     <string name="setting_reporting_endpoint_reset_action">Reset</string>
     <string name="setting_reporting_endpoint_verifying">Verifying endpoint...</string>
     <string name="setting_telemetry_diagnostics_title">Telemetry diagnostics</string>
+    <string name="telemetry_diagnostics_row_summary">%1$s telemetry %2$s\nRadio %3$s, GNSS %4$s, last sample %5$s</string>
+    <string name="telemetry_diagnostics_row_blocked_summary">%1$s telemetry %2$s\nLast blocked reason: %3$s</string>
     <string name="telemetry_diagnostics_source_line">Source: %1$s, %2$s</string>
     <string name="telemetry_diagnostics_radio_line">Radio: %1$d source(s), last update %2$s</string>
     <string name="telemetry_diagnostics_gnss_line">GNSS: %1$s, last update %2$s</string>
@@ -68,6 +70,7 @@
     <string name="telemetry_diagnostics_seconds_ago">%1$d s ago</string>
     <string name="telemetry_diagnostics_minutes_ago">%1$d min ago</string>
     <string name="telemetry_diagnostics_hours_ago">%1$d h ago</string>
+    <string name="telemetry_diagnostics_copy_action">Copy</string>
     <string name="telemetry_diagnostics_copied">Telemetry diagnostics copied</string>
     <string name="setting_enhanced_privacy_title">Enhanced privacy</string>
     <string name="setting_enhanced_privacy_summary">Store new coverage samples with time set to UTC midnight and less precise location details.</string>
@@ -108,12 +111,12 @@
     <string name="coverage_export_csv_summary">Create a CSV file from recorded coverage samples.</string>
     <string name="coverage_export_recent_action">Recent 1,000 samples</string>
     <string name="coverage_export_all_action">All local samples</string>
-    <string name="delete_reported_coverage_data_title">Delete reported samples</string>
-    <string name="delete_reported_coverage_data_summary">Delete %1$s already reported from this device.</string>
-    <string name="delete_reported_coverage_data_empty_summary">No reported samples to delete.</string>
-    <string name="delete_reported_coverage_data_empty_message">There are no reported samples to delete.</string>
-    <string name="delete_reported_coverage_data_confirm_message">Delete %1$s that have already been reported? Queued samples are kept. This cannot be undone.</string>
-    <string name="delete_reported_coverage_data_confirm_action">Delete reported</string>
+    <string name="delete_reported_coverage_data_title">Clear reported samples</string>
+    <string name="delete_reported_coverage_data_summary">Remove %1$s already reported from this device.</string>
+    <string name="delete_reported_coverage_data_empty_summary">No reported samples to clear.</string>
+    <string name="delete_reported_coverage_data_empty_message">There are no reported samples to clear.</string>
+    <string name="delete_reported_coverage_data_confirm_message">Clear %1$s that have already been reported? Queued samples are kept.</string>
+    <string name="delete_reported_coverage_data_confirm_action">Clear reported</string>
     <string name="delete_export_cache_title">Delete exported CSV files</string>
     <string name="delete_export_cache_summary">Delete %1$s (%2$s) created for sharing.</string>
     <string name="delete_export_cache_confirm_message">Delete exported CSV files from this device cache?\n\n%1$s</string>

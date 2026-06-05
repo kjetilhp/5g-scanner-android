@@ -53,6 +53,7 @@ class ScannerService : Service() {
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(AppConfig.Defaults.gnssMode)
     private var sampleScheduled = false
     private var gnssRefreshScheduled = false
+    private var diagnosticsRefreshScheduled = false
     private var telemetrySourcesStarted = false
     private var lastSampleAttemptAt: Instant? = null
     private var gnssMode = AppConfig.Defaults.gnssMode
@@ -94,6 +95,18 @@ class ScannerService : Service() {
         }
     }
 
+    private val diagnosticsRefresh = object : Runnable {
+        override fun run() {
+            diagnosticsRefreshScheduled = false
+            if (!scannerDesired()) {
+                stopScannerService()
+                return
+            }
+            publishState(updateNotification = false)
+            scheduleDiagnosticsRefresh()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         settingsStore = AppSettingsStore(this)
@@ -116,8 +129,10 @@ class ScannerService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(sampler)
         handler.removeCallbacks(gnssRefresh)
+        handler.removeCallbacks(diagnosticsRefresh)
         sampleScheduled = false
         gnssRefreshScheduled = false
+        diagnosticsRefreshScheduled = false
         stopTelemetrySources()
         publishStoppedState()
         super.onDestroy()
@@ -143,14 +158,17 @@ class ScannerService : Service() {
         }
         scheduleNextSample(0L)
         scheduleGnssRefresh(gnssRefreshIntervalMs())
+        scheduleDiagnosticsRefresh()
         Log.i(TAG, "Scanner service started: gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}")
     }
 
     private fun stopScannerService() {
         handler.removeCallbacks(sampler)
         handler.removeCallbacks(gnssRefresh)
+        handler.removeCallbacks(diagnosticsRefresh)
         sampleScheduled = false
         gnssRefreshScheduled = false
+        diagnosticsRefreshScheduled = false
         stopTelemetrySources()
         publishStoppedState()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -374,6 +392,12 @@ class ScannerService : Service() {
         handler.postDelayed(gnssRefresh, delayMs)
     }
 
+    private fun scheduleDiagnosticsRefresh() {
+        if (diagnosticsRefreshScheduled) return
+        diagnosticsRefreshScheduled = true
+        handler.postDelayed(diagnosticsRefresh, AppConfig.Scanner.diagnosticsRefreshMs)
+    }
+
     private fun gnssRefreshIntervalMs(): Long =
         when (gnssMode) {
             GnssMode.HighAccuracy -> AppConfig.Scanner.highAccuracyGnssRefreshMs
@@ -381,7 +405,7 @@ class ScannerService : Service() {
             GnssMode.LowPower -> AppConfig.Scanner.lowPowerGnssRefreshMs
         }
 
-    private fun publishState() {
+    private fun publishState(updateNotification: Boolean = true) {
         val errorReason = scannerErrorReason()
         currentState = State(
             status = if (errorReason == null) ScannerStatus.RUNNING else ScannerStatus.ERROR,
@@ -391,7 +415,9 @@ class ScannerService : Service() {
             latestTelemetry = latestTelemetry,
             diagnostics = diagnostics(),
         )
-        updateForegroundNotification(errorReason)
+        if (updateNotification) {
+            updateForegroundNotification(errorReason)
+        }
         sendBroadcast(Intent(ACTION_STATE_CHANGED).setPackage(packageName))
     }
 

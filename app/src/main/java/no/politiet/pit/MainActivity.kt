@@ -43,11 +43,15 @@ import android.net.Uri
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.AnimationUtils
 import android.view.animation.LinearInterpolator
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -55,7 +59,6 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -73,15 +76,11 @@ import no.politiet.pit.telemetry.ScannerTelemetrySnapshot
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.util.Date
 import kotlin.random.Random
 
 class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListener {
     private val handler = Handler(Looper.getMainLooper())
-    private val clockFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-        .withZone(ZoneId.systemDefault())
-    private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-        .withZone(ZoneId.systemDefault())
 
     private var consentGranted = false
     private var waitingForInitialPermissions = false
@@ -110,14 +109,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private var errorPulseScheduled = false
     private var scannerActivityRing: View? = null
     private var scannerActivityRingAnimator: ObjectAnimator? = null
+    private var settingsListAdapter: SettingsListAdapter? = null
     private var settingsBackCallback: OnBackInvokedCallback? = null
     private var latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
     private var gnssAgeTickScheduled = false
     private var settingsRefreshScheduled = false
     private var reportingCountdownRefreshScheduled = false
     private var pendingAnimatedSampleId: Long? = null
-    private var pendingMainSettingsScrollY: Int? = null
-    private var pendingCoverageDataScrollY: Int? = null
     private var scannerStateReceiverRegistered = false
     private lateinit var coverageDataStore: CoverageDataStore
     private lateinit var settingsStore: AppSettingsStore
@@ -177,7 +175,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         override fun run() {
             settingsRefreshScheduled = false
             if (showingSettings) {
-                render()
+                when (settingsDestination) {
+                    SettingsDestination.Main,
+                    SettingsDestination.About,
+                    SettingsDestination.CoverageData -> refreshSettingsRows()
+                }
             }
         }
     }
@@ -186,7 +188,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         override fun run() {
             reportingCountdownRefreshScheduled = false
             if (showingSettings && settingsDestination == SettingsDestination.Main) {
-                render()
+                refreshSettingsRows()
+                scheduleReportingCountdownRefresh()
             }
         }
     }
@@ -196,7 +199,9 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             when (intent?.action) {
                 ScannerService.ACTION_STATE_CHANGED -> {
                     syncScannerStateFromService(animateBars = true)
-                    if (!showingSettings) {
+                    if (showingSettings) {
+                        scheduleSettingsRefresh()
+                    } else {
                         updateScannerUi()
                     }
                 }
@@ -204,8 +209,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     if (showingSettings && settingsDestination == SettingsDestination.CoverageData) {
                         pendingAnimatedSampleId = intent.getLongExtra(ScannerService.EXTRA_SAMPLE_ID, 0L)
                             .takeIf { it > 0L }
-                        pendingCoverageDataScrollY = activeSettingsScrollY(COVERAGE_DATA_SCROLL_TAG)
-                        render()
+                        refreshSettingsRows()
                     } else {
                         scheduleSettingsRefresh()
                     }
@@ -344,7 +348,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun render(transition: ScreenTransition = ScreenTransition.None) {
-        captureSettingsScrollBeforeRefresh(transition)
+        settingsListAdapter = null
         updateSettingsBackCallback()
         val nextView = when {
             !consentGranted -> createConsentView()
@@ -360,19 +364,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         if (consentGranted) {
             ensureSamplerState()
             updateScannerUi()
-        }
-    }
-
-    private fun captureSettingsScrollBeforeRefresh(transition: ScreenTransition) {
-        if (!showingSettings || transition != ScreenTransition.None) return
-        when (settingsDestination) {
-            SettingsDestination.Main -> pendingMainSettingsScrollY = activeSettingsScrollY(MAIN_SETTINGS_SCROLL_TAG)
-            SettingsDestination.CoverageData -> {
-                if (pendingCoverageDataScrollY == null) {
-                    pendingCoverageDataScrollY = activeSettingsScrollY(COVERAGE_DATA_SCROLL_TAG)
-                }
-            }
-            SettingsDestination.About -> Unit
         }
     }
 
@@ -531,100 +522,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         clearScannerViews()
         lastReportedAt = ReportingScheduler.lastReportedAt(this)
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(32))
-        }
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_location)))
-        content.addView(settingsGroup(
-            settingsPreferenceRow(
-                title = getString(R.string.setting_gnss_mode_title),
-                summary = gnssMode.summary,
-                value = gnssMode.label,
-            ) {
-                showGnssModeDialog()
+        val root = settingsListScreen(
+            title = getString(R.string.settings_title),
+            backDescription = getString(R.string.back_to_scanner),
+            onBack = {
+                showingSettings = false
+                settingsDestination = SettingsDestination.Main
+                render(ScreenTransition.Back)
             },
-        ))
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_privacy)))
-        content.addView(settingsGroup(
-            settingsToggleRow(
-                title = getString(R.string.setting_enhanced_privacy_title),
-                summary = getString(R.string.setting_enhanced_privacy_summary),
-                isChecked = enhancedPrivacyEnabled,
-            ) { enabled ->
-                enhancedPrivacyEnabled = enabled
-                Log.d(TAG, "Enhanced privacy changed: enabled=$enhancedPrivacyEnabled")
-                saveState()
-                render()
-            },
-        ))
-
-        val reportingRows = mutableListOf<View>(
-            settingsPreferenceRow(
-                title = getString(R.string.setting_reporting_mode_title),
-                summary = reportingSummary(),
-                value = reportingMode.label,
-            ) {
-                showReportingModeDialog()
-            },
+            items = mainSettingsItems(),
         )
-        reportingRows.add(settingsPreferenceRow(
-            title = getString(R.string.setting_recorded_coverage_data_title),
-            summary = coverageDataSummary(),
-            value = "",
-        ) {
-            Log.d(TAG, "Opening recorded coverage data")
-            settingsDestination = SettingsDestination.CoverageData
-            render(ScreenTransition.Forward)
-        })
-        if (reportingMode != ReportingMode.Continuous) {
-            reportingRows.add(settingsActionRow(
-                title = getString(R.string.setting_send_now_title),
-                summary = getString(R.string.setting_send_now_summary),
-                titleColor = SETTINGS_ACCENT,
-            ) {
-                sendNow()
-            })
-        }
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_reporting)))
-        content.addView(settingsGroup(*reportingRows.toTypedArray()))
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_about)))
-        content.addView(settingsGroup(
-            settingsActionRow(
-                title = getString(R.string.setting_about_title),
-                summary = getString(R.string.setting_about_summary),
-            ) {
-                Log.d(TAG, "Opening About")
-                settingsDestination = SettingsDestination.About
-                render(ScreenTransition.Forward)
-            },
-        ))
-
-        val scroller = ScrollView(this).apply {
-            setBackgroundColor(SETTINGS_BACKGROUND)
-            tag = MAIN_SETTINGS_SCROLL_TAG
-            addView(content)
-            pendingMainSettingsScrollY?.let { scrollY ->
-                post {
-                    scrollTo(0, scrollY)
-                    pendingMainSettingsScrollY = null
-                }
-            }
-        }
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(SETTINGS_BACKGROUND)
-            addView(settingsToolbar())
-            addView(scroller, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            ))
-        }
 
         updateScannerUi()
         scheduleReportingCountdownRefresh()
@@ -634,6 +541,20 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun createCoverageDataView(): View {
         clearScannerViews()
+        val items = coverageDataItems()
+
+        return settingsListScreen(
+            title = getString(R.string.setting_recorded_coverage_data_title),
+            backDescription = getString(R.string.back_to_settings),
+            onBack = {
+                settingsDestination = SettingsDestination.Main
+                render(ScreenTransition.Back)
+            },
+            items = items,
+        )
+    }
+
+    private fun coverageDataItems(): List<SettingsListItem> {
         val stats = coverageDataStore.stats()
         val recentSamples = if (stats.sampleCount > 0) {
             coverageDataStore.recentInspectionSamples(AppConfig.RecordedCoverageData.recentSampleInspectionLimit)
@@ -641,28 +562,21 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             emptyList()
         }
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(32))
-        }
-
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_coverage_data)))
-        content.addView(coverageDataStatsGroup(stats))
-        val actionRows = mutableListOf<View>()
+        val actionRows = mutableListOf<() -> View>()
         if (stats.sampleCount > 0) {
-            actionRows.add(
+            actionRows.add {
                 settingsActionRow(
                     title = getString(R.string.coverage_export_csv_title),
                     summary = getString(R.string.coverage_export_csv_summary),
                     titleColor = SETTINGS_ACCENT,
                 ) {
                     showExportCsvActions()
-                },
-            )
+                }
+            }
         }
         if (stats.sampleCount > 0) {
-            actionRows.add(
-                if (stats.reportedSampleCount > 0) settingsDestructiveActionRow(
+            actionRows.add {
+                if (stats.reportedSampleCount > 0) settingsActionRow(
                     title = getString(R.string.delete_reported_coverage_data_title),
                     summary = getString(
                         R.string.delete_reported_coverage_data_summary,
@@ -683,11 +597,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                         getString(R.string.delete_reported_coverage_data_empty_message),
                         Toast.LENGTH_SHORT,
                     ).show()
-                },
-            )
+                }
+            }
         }
         if (stats.exportCacheFileCount > 0) {
-            actionRows.add(
+            actionRows.add {
                 settingsDestructiveActionRow(
                     title = getString(R.string.delete_export_cache_title),
                     summary = getString(
@@ -701,42 +615,43 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                     ),
                 ) {
                     confirmDeleteExportCache(stats.exportCacheFileCount, stats.exportCacheBytes)
-                },
-            )
+                }
+            }
         }
         if (stats.sampleCount > 0) {
-            actionRows.add(
+            actionRows.add {
                 settingsDestructiveActionRow(
                     title = getString(R.string.delete_all_coverage_data_title),
                     summary = getString(R.string.delete_all_coverage_data_summary),
                 ) {
                     confirmDeleteAllSamples(stats.sampleCount, stats.exportCacheFileCount, stats.exportCacheBytes)
-                },
-            )
-        }
-        if (actionRows.isNotEmpty()) {
-            content.addView(settingsSectionLabel(getString(R.string.coverage_data_actions_title)))
-            content.addView(settingsGroup(*actionRows.toTypedArray()))
-        }
-        if (recentSamples.isNotEmpty()) {
-            content.addView(settingsSectionLabel(getString(R.string.coverage_data_recent_title)))
-            content.addView(settingsGroup(*recentSamples.map { sample ->
-                inspectionSampleRow(sample)
-            }.toTypedArray()))
-            pendingAnimatedSampleId = null
+                }
+            }
         }
 
-        return settingsScreen(
-            title = getString(R.string.setting_recorded_coverage_data_title),
-            backDescription = getString(R.string.back_to_settings),
-            onBack = {
-                settingsDestination = SettingsDestination.Main
-                render(ScreenTransition.Back)
-            },
-            body = content,
-            scrollTag = COVERAGE_DATA_SCROLL_TAG,
-            initialScrollY = pendingCoverageDataScrollY,
-        )
+        val queuedSampleCount = ReportingScheduler.status(this).queuedSampleCount
+        val animatedSampleId = pendingAnimatedSampleId
+        val items = mutableListOf<SettingsListItem>()
+        items.add(settingsSectionItem("coverage-summary-label", getString(R.string.settings_section_coverage_data)))
+        items.add(settingsGroupItem("coverage-summary", listOf(stats, queuedSampleCount)) {
+            coverageDataStatsGroup(stats, queuedSampleCount)
+        })
+        if (actionRows.isNotEmpty()) {
+            items.add(settingsSectionItem("coverage-actions-label", getString(R.string.coverage_data_actions_title)))
+            items.add(settingsGroupItem("coverage-actions", stats) {
+                settingsGroup(*actionRows.map { row -> row() }.toTypedArray())
+            })
+        }
+        if (recentSamples.isNotEmpty()) {
+            items.add(settingsSectionItem("coverage-recent-label", getString(R.string.coverage_data_recent_title)))
+            items.add(settingsGroupItem("coverage-recent", listOf(recentSamples, animatedSampleId)) {
+                settingsGroup(*recentSamples.map { sample ->
+                    inspectionSampleRow(sample, animatedSampleId)
+                }.toTypedArray())
+            })
+            pendingAnimatedSampleId = null
+        }
+        return items
     }
 
     private fun confirmDeleteAllSamples(sampleCount: Int, exportCacheFileCount: Int, exportCacheBytes: Long) {
@@ -757,7 +672,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setPositiveButton(getString(R.string.delete_all_coverage_data_confirm_action)) { _, _ ->
                 val deletedSamples = coverageDataStore.deleteAllSamples()
                 Log.d(TAG, "Deleted local coverage samples: samples=$deletedSamples")
-                render()
+                refreshSettingsRows()
             }
             .show()
     }
@@ -779,7 +694,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setPositiveButton(getString(R.string.delete_reported_coverage_data_confirm_action)) { _, _ ->
                 val deletedSamples = coverageDataStore.deleteReportedSamples()
                 Log.d(TAG, "Deleted reported coverage samples: samples=$deletedSamples")
-                render()
+                refreshSettingsRows()
             }
             .show()
     }
@@ -797,7 +712,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             .setPositiveButton(getString(R.string.delete_export_cache_confirm_action)) { _, _ ->
                 val deletedFiles = coverageDataStore.deleteExportCache()
                 Log.d(TAG, "Deleted exported CSV cache: files=$deletedFiles")
-                render()
+                refreshSettingsRows()
             }
             .show()
     }
@@ -813,9 +728,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             formatBytes(bytes),
         )
 
-    private fun coverageDataStatsGroup(stats: CoverageDataStore.RecordedDataStats): LinearLayout {
-        val queuedSampleCount = ReportingScheduler.status(this).queuedSampleCount
-        return settingsGroup(
+    private fun coverageDataStatsGroup(
+        stats: CoverageDataStore.RecordedDataStats,
+        queuedSampleCount: Int,
+    ): LinearLayout =
+        settingsGroup(
             settingsInfoRow(
                 title = getString(R.string.coverage_data_summary_title),
                 summary = getString(
@@ -834,7 +751,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 ),
             ),
         )
-    }
 
     private fun inspectionSampleTitle(sample: CoverageDataStore.InspectionSample): String =
         buildString {
@@ -854,13 +770,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         return if (sample.privacyReduced) {
             capturedDate.toString()
         } else if (capturedDate == java.time.LocalDate.now()) {
-            clockFormatter.format(capturedAt)
+            formatTime(capturedAt)
         } else {
-            dateTimeFormatter.format(capturedAt)
+            formatDateTime(capturedAt)
         }
     }
 
-    private fun inspectionSampleRow(sample: CoverageDataStore.InspectionSample): LinearLayout =
+    private fun inspectionSampleRow(
+        sample: CoverageDataStore.InspectionSample,
+        animatedSampleId: Long?,
+    ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             minimumHeight = dp(86)
@@ -871,7 +790,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             )
             isFocusable = true
             setOnClickListener { showInspectionSampleDetails(sample) }
-            if (sample.id == pendingAnimatedSampleId) {
+            if (sample.id == animatedSampleId) {
                 startAnimation(AnimationUtils.loadAnimation(this@MainActivity, android.R.anim.fade_in))
             }
 
@@ -999,81 +918,14 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun createAboutView(): View {
         clearScannerViews()
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(32))
-        }
-
-        content.addView(aboutSection(
-            title = getString(R.string.about_intro_title),
-            body = getString(R.string.about_intro_body),
-        ))
-        content.addView(aboutSection(
-            title = getString(R.string.about_data_title),
-            body = getString(R.string.about_data_body),
-        ))
-        content.addView(aboutSection(
-            title = getString(R.string.about_privacy_title),
-            body = getString(R.string.about_privacy_body),
-        ))
-        content.addView(aboutSection(
-            title = getString(R.string.about_storage_title),
-            body = getString(R.string.about_storage_body),
-        ))
-        content.addView(aboutSection(
-            title = getString(R.string.about_participation_title),
-            body = getString(R.string.about_participation_body),
-        ))
-        content.addView(aboutSection(
-            title = getString(R.string.about_app_title),
-            body = getString(
-                R.string.about_app_body,
-                packageInfoVersionName(),
-                packageName,
-            ),
-        ))
-        content.addView(settingsSectionLabel(getString(R.string.settings_section_developer)))
-        content.addView(settingsGroup(
-            settingsPreferenceRow(
-                title = getString(R.string.setting_reporting_endpoint_title),
-                summary = getString(R.string.setting_reporting_endpoint_summary),
-                value = reportingEndpointDisplayValue(),
-                detail = reportingEndpointDetail(),
-            ) {
-                showReportingEndpointDialog()
-            },
-            settingsToggleRow(
-                title = getString(R.string.setting_mock_telemetry_title),
-                summary = if (DeviceProfile.isLikelyEmulator()) {
-                    getString(R.string.setting_mock_telemetry_emulator_summary)
-                } else {
-                    getString(R.string.setting_mock_telemetry_summary)
-                },
-                isChecked = mockTelemetryEnabled || DeviceProfile.isLikelyEmulator(),
-                isEnabled = !DeviceProfile.isLikelyEmulator(),
-            ) { enabled ->
-                mockTelemetryEnabled = enabled
-                Log.d(TAG, "Mock telemetry changed: enabled=$mockTelemetryEnabled")
-                saveState()
-                ensureSamplerState()
-                render()
-            },
-            settingsActionRow(
-                title = getString(R.string.setting_telemetry_diagnostics_title),
-                summary = telemetryDiagnosticsSummary(),
-            ) {
-                copyTelemetryDiagnostics()
-            },
-        ))
-
-        return settingsScreen(
+        return settingsListScreen(
             title = getString(R.string.setting_about_title),
             backDescription = getString(R.string.back_to_settings),
             onBack = {
                 settingsDestination = SettingsDestination.Main
                 render(ScreenTransition.Back)
             },
-            body = content,
+            items = aboutSettingsItems(),
         )
     }
 
@@ -1112,6 +964,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         scannerActivityRing = null
         stopGnssAgeTick()
     }
+
+    private fun refreshSettingsRows() {
+        lastReportedAt = ReportingScheduler.lastReportedAt(this)
+        settingsListAdapter?.replaceItems(currentSettingsItems()) ?: render()
+    }
+
+    private fun currentSettingsItems(): List<SettingsListItem> =
+        when (settingsDestination) {
+            SettingsDestination.Main -> mainSettingsItems()
+            SettingsDestination.CoverageData -> coverageDataItems()
+            SettingsDestination.About -> aboutSettingsItems()
+        }
 
     private fun stopScanning() {
         stoppedManually = true
@@ -1467,7 +1331,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             "",
             getString(
                 R.string.reporting_last_sent_line,
-                lastReportedAt?.let(dateTimeFormatter::format) ?: getString(R.string.never),
+                lastReportedAt?.let(::formatDateTime) ?: getString(R.string.never),
             ),
         )
         reportingNextUploadLine()?.let(lines::add)
@@ -1595,7 +1459,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         Log.i(
             TAG,
-            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, reportingEndpointUrl=$reportingEndpointUrl, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportDateTime=${lastReportedAt?.let(dateTimeFormatter::format) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
+            "Applied settings on launch: consentGranted=$consentGranted, scannerStopped=$stoppedManually, scannerWillSample=${canSample()}, gnssMode=${gnssMode.name}, reportingMode=${reportingMode.name}, reportingEndpointUrl=$reportingEndpointUrl, mockTelemetryEnabled=$mockTelemetryEnabled, enhancedPrivacyEnabled=$enhancedPrivacyEnabled, lastReportDateTime=${lastReportedAt?.let(::formatDateTime) ?: "never"}, lastReportedAt=$lastReportedAt, coverageDataStore=${coverageDataStore.displayDirectory()}",
         )
     }
 
@@ -1803,39 +1667,205 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             setOnClickListener { onClick() }
         }
 
-    private fun settingsScreen(
+    private fun mainSettingsItems(): List<SettingsListItem> {
+        val reportingSummary = reportingSummary()
+        val coverageDataSummary = coverageDataSummary()
+        val mainReportingContentKey = listOf(
+            reportingMode,
+            reportingSummary,
+            coverageDataSummary,
+            reportingEndpointUrl,
+            lastReportedAt,
+        )
+        val reportingRows = mutableListOf<() -> View>(
+            {
+                settingsPreferenceRow(
+                    title = getString(R.string.setting_reporting_mode_title),
+                    summary = reportingSummary,
+                    value = reportingMode.label,
+                ) {
+                    showReportingModeDialog()
+                }
+            },
+            {
+                settingsPreferenceRow(
+                    title = getString(R.string.setting_recorded_coverage_data_title),
+                    summary = coverageDataSummary,
+                    value = "",
+                ) {
+                    Log.d(TAG, "Opening recorded coverage data")
+                    settingsDestination = SettingsDestination.CoverageData
+                    render(ScreenTransition.Forward)
+                }
+            },
+        )
+        if (reportingMode != ReportingMode.Continuous) {
+            reportingRows.add {
+                settingsActionRow(
+                    title = getString(R.string.setting_send_now_title),
+                    summary = getString(R.string.setting_send_now_summary),
+                    titleColor = SETTINGS_ACCENT,
+                ) {
+                    sendNow()
+                }
+            }
+        }
+
+        return listOf(
+            settingsSectionItem("main-location-label", getString(R.string.settings_section_location)),
+            settingsGroupItem("main-location", gnssMode) {
+                settingsGroup(
+                    settingsPreferenceRow(
+                        title = getString(R.string.setting_gnss_mode_title),
+                        summary = gnssMode.summary,
+                        value = gnssMode.label,
+                    ) {
+                        showGnssModeDialog()
+                    },
+                )
+            },
+            settingsSectionItem("main-privacy-label", getString(R.string.settings_section_privacy)),
+            settingsGroupItem("main-privacy", enhancedPrivacyEnabled) {
+                settingsGroup(
+                    settingsToggleRow(
+                        title = getString(R.string.setting_enhanced_privacy_title),
+                        summary = getString(R.string.setting_enhanced_privacy_summary),
+                        isChecked = enhancedPrivacyEnabled,
+                    ) { enabled ->
+                        enhancedPrivacyEnabled = enabled
+                        Log.d(TAG, "Enhanced privacy changed: enabled=$enhancedPrivacyEnabled")
+                        saveState()
+                        render()
+                    },
+                )
+            },
+            settingsSectionItem("main-reporting-label", getString(R.string.settings_section_reporting)),
+            settingsGroupItem(
+                "main-reporting",
+                mainReportingContentKey,
+            ) {
+                settingsGroup(*reportingRows.map { row -> row() }.toTypedArray())
+            },
+            settingsSectionItem("main-about-label", getString(R.string.settings_section_about)),
+            settingsGroupItem("main-about") {
+                settingsGroup(
+                    settingsActionRow(
+                        title = getString(R.string.setting_about_title),
+                        summary = getString(R.string.setting_about_summary),
+                    ) {
+                        Log.d(TAG, "Opening About")
+                        settingsDestination = SettingsDestination.About
+                        render(ScreenTransition.Forward)
+                    },
+                )
+            },
+        )
+    }
+
+    private fun aboutSettingsItems(): List<SettingsListItem> {
+        val endpointDisplayValue = reportingEndpointDisplayValue()
+        val endpointDetail = reportingEndpointDetail()
+        val telemetryRowSummary = telemetryDiagnosticsRowSummary()
+        val telemetryDetails = telemetryDiagnosticsSummary()
+        return listOf(
+            aboutSectionItem("about-intro", getString(R.string.about_intro_title), getString(R.string.about_intro_body)),
+            aboutSectionItem("about-data", getString(R.string.about_data_title), getString(R.string.about_data_body)),
+            aboutSectionItem("about-privacy", getString(R.string.about_privacy_title), getString(R.string.about_privacy_body)),
+            aboutSectionItem("about-storage", getString(R.string.about_storage_title), getString(R.string.about_storage_body)),
+            aboutSectionItem("about-participation", getString(R.string.about_participation_title), getString(R.string.about_participation_body)),
+            aboutSectionItem(
+                "about-app",
+                getString(R.string.about_app_title),
+                getString(
+                    R.string.about_app_body,
+                    packageInfoVersionName(),
+                    packageName,
+                ),
+            ),
+            settingsSectionItem("about-developer-label", getString(R.string.settings_section_developer)),
+            settingsGroupItem(
+                "about-developer",
+                listOf(
+                    endpointDisplayValue,
+                    endpointDetail,
+                    mockTelemetryEnabled,
+                    DeviceProfile.isLikelyEmulator(),
+                    telemetryRowSummary,
+                    telemetryDetails,
+                ),
+            ) {
+                settingsGroup(
+                    settingsPreferenceRow(
+                        title = getString(R.string.setting_reporting_endpoint_title),
+                        summary = getString(R.string.setting_reporting_endpoint_summary),
+                        value = endpointDisplayValue,
+                        detail = endpointDetail,
+                    ) {
+                        showReportingEndpointDialog()
+                    },
+                    settingsToggleRow(
+                        title = getString(R.string.setting_mock_telemetry_title),
+                        summary = if (DeviceProfile.isLikelyEmulator()) {
+                            getString(R.string.setting_mock_telemetry_emulator_summary)
+                        } else {
+                            getString(R.string.setting_mock_telemetry_summary)
+                        },
+                        isChecked = mockTelemetryEnabled || DeviceProfile.isLikelyEmulator(),
+                        isEnabled = !DeviceProfile.isLikelyEmulator(),
+                    ) { enabled ->
+                        mockTelemetryEnabled = enabled
+                        Log.d(TAG, "Mock telemetry changed: enabled=$mockTelemetryEnabled")
+                        saveState()
+                        ensureSamplerState()
+                        render()
+                    },
+                    telemetryDiagnosticsRow(telemetryRowSummary),
+                )
+            },
+        )
+    }
+
+    private fun settingsListScreen(
         title: String,
         backDescription: String,
         onBack: () -> Unit,
-        body: View,
-        scrollTag: String? = null,
-        initialScrollY: Int? = null,
+        items: List<SettingsListItem>,
     ): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(SETTINGS_BACKGROUND)
             addView(settingsToolbar(title, backDescription, onBack))
-            addView(ScrollView(this@MainActivity).apply {
-                setBackgroundColor(SETTINGS_BACKGROUND)
-                tag = scrollTag
-                addView(body)
-                initialScrollY?.let { scrollY ->
-                    post {
-                        scrollTo(0, scrollY)
-                        if (scrollTag == COVERAGE_DATA_SCROLL_TAG) {
-                            pendingCoverageDataScrollY = null
-                        }
-                    }
-                }
-            }, LinearLayout.LayoutParams(
+            addView(settingsRecyclerView(items), LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f,
             ))
         }
 
-    private fun activeSettingsScrollY(tag: String): Int? =
-        window.decorView.findViewWithTag<ScrollView>(tag)?.scrollY
+    private fun settingsRecyclerView(items: List<SettingsListItem>): RecyclerView =
+        RecyclerView(this).apply {
+            setBackgroundColor(SETTINGS_BACKGROUND)
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            val settingsAdapter = SettingsListAdapter(items)
+            adapter = settingsAdapter
+            settingsListAdapter = settingsAdapter
+            itemAnimator = null
+            clipToPadding = false
+            setPadding(dp(16), dp(8), dp(16), dp(32))
+        }
+
+    private fun settingsSectionItem(id: String, title: String): SettingsListItem =
+        SettingsListItem(id, title) { settingsSectionLabel(title) }
+
+    private fun settingsGroupItem(
+        id: String,
+        contentKey: Any = Unit,
+        factory: () -> View,
+    ): SettingsListItem =
+        SettingsListItem(id, contentKey, factory)
+
+    private fun aboutSectionItem(id: String, title: String, body: String): SettingsListItem =
+        SettingsListItem(id, listOf(title, body)) { aboutSection(title, body) }
 
     private fun settingsToolbar(
         title: String = getString(R.string.settings_title),
@@ -1892,6 +1922,66 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 }
             }
         }
+
+    private data class SettingsListItem(
+        val key: String,
+        val contentKey: Any,
+        val createView: () -> View,
+    ) {
+        val stableId: Long = key.hashCode().toLong()
+    }
+
+    private class SettingsListAdapter(
+        initialItems: List<SettingsListItem>,
+    ) : RecyclerView.Adapter<SettingsListAdapter.SettingsViewHolder>() {
+        private val items = initialItems.toMutableList()
+
+        init {
+            setHasStableIds(true)
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        override fun getItemId(position: Int): Long = items[position].stableId
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SettingsViewHolder =
+            SettingsViewHolder(
+                FrameLayout(parent.context).apply {
+                    layoutParams = RecyclerView.LayoutParams(
+                        RecyclerView.LayoutParams.MATCH_PARENT,
+                        RecyclerView.LayoutParams.WRAP_CONTENT,
+                    )
+                },
+            )
+
+        override fun onBindViewHolder(holder: SettingsViewHolder, position: Int) {
+            holder.container.removeAllViews()
+            holder.container.addView(items[position].createView(), FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
+        fun replaceItems(nextItems: List<SettingsListItem>) {
+            val previousItems = items.toList()
+            val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = previousItems.size
+
+                override fun getNewListSize(): Int = nextItems.size
+
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                    previousItems[oldItemPosition].key == nextItems[newItemPosition].key
+
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+                    previousItems[oldItemPosition].contentKey == nextItems[newItemPosition].contentKey
+            })
+            items.clear()
+            items.addAll(nextItems)
+            diff.dispatchUpdatesTo(this)
+        }
+
+        class SettingsViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
+    }
 
     private fun settingsPreferenceRow(
         title: String,
@@ -1964,6 +2054,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             titleColor = SETTINGS_DESTRUCTIVE,
         ).apply {
             setOnClickListener { onClick() }
+        }
+
+    private fun telemetryDiagnosticsRow(summary: String): LinearLayout =
+        settingsRow(
+            title = getString(R.string.setting_telemetry_diagnostics_title),
+            summary = summary,
+            value = null,
+            isClickable = true,
+        ).apply {
+            setOnClickListener { showTelemetryDiagnosticsDialog() }
         }
 
     private fun settingsRow(
@@ -2049,74 +2149,21 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun showGnssModeDialog() {
         val modes = GnssMode.entries.toList()
-        val dialog = AlertDialog.Builder(this)
+        val labels = modes.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
             .setTitle(getString(R.string.setting_gnss_mode_title))
-            .setNegativeButton(android.R.string.cancel, null)
-            .create()
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-        modes.forEach { mode ->
-            content.addView(locationModeChoiceRow(mode) {
-                gnssMode = mode
+            .setSingleChoiceItems(labels, modes.indexOf(gnssMode)) { dialog, which ->
+                gnssMode = modes[which]
                 latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
                 Log.d(TAG, "GNSS mode changed: gnssMode=${gnssMode.name}")
                 saveState()
                 ensureSamplerState()
                 dialog.dismiss()
                 render()
-            })
-        }
-
-        dialog.setView(ScrollView(this).apply {
-            addView(content)
-        })
-        dialog.show()
-    }
-
-    private fun locationModeChoiceRow(mode: GnssMode, onSelected: () -> Unit): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = rippleBackground(Color.TRANSPARENT, dp(6))
-            setOnClickListener { onSelected() }
-
-            addView(RadioButton(this@MainActivity).apply {
-                isChecked = mode == gnssMode
-                isClickable = false
-                buttonTintList = ColorStateList.valueOf(SETTINGS_ACCENT)
-            }, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                marginEnd = dp(12)
-            })
-
-            val textColumn = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
             }
-            textColumn.addView(TextView(this@MainActivity).apply {
-                text = mode.label
-                textSize = 16f
-                setTextColor(SETTINGS_TEXT)
-                includeFontPadding = false
-            })
-            textColumn.addView(TextView(this@MainActivity).apply {
-                text = mode.summary
-                textSize = 14f
-                setTextColor(SETTINGS_SUBTLE_TEXT)
-                setPadding(0, dp(4), 0, 0)
-                setLineSpacing(dp(2).toFloat(), 1f)
-            })
-            addView(textColumn, LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f,
-            ))
-        }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
 
     private fun showReportingModeDialog() {
         val labels = ReportingMode.entries.map { it.label }.toTypedArray()
@@ -2150,12 +2197,8 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun telemetryDiagnosticsSummary(): String {
         val diagnostics = ScannerService.currentState.diagnostics
-        val source = diagnostics.telemetrySource.replaceFirstChar { it.uppercase() }
-        val runningText = if (diagnostics.telemetrySourcesStarted) {
-            getString(R.string.telemetry_diagnostics_running)
-        } else {
-            getString(R.string.telemetry_diagnostics_waiting)
-        }
+        val source = telemetrySourceLabel()
+        val runningText = telemetryRunningLabel()
         val gnssTier = diagnostics.gnssTier ?: getString(R.string.telemetry_diagnostics_unknown)
         val lastSkip = diagnostics.lastSampleSkipReason ?: getString(R.string.telemetry_diagnostics_none)
         return listOf(
@@ -2166,6 +2209,55 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             getString(R.string.telemetry_diagnostics_skip_line, lastSkip),
         ).joinToString("\n")
     }
+
+    private fun telemetryDiagnosticsRowSummary(): String {
+        val diagnostics = ScannerService.currentState.diagnostics
+        val source = telemetrySourceLabel()
+        val runningText = telemetryRunningLabel()
+        val radioAge = formatDiagnosticsAge(diagnostics.lastRadioUpdateAt)
+        val gnssAge = formatDiagnosticsAge(diagnostics.lastGnssUpdateAt)
+        val sampleAge = formatDiagnosticsAge(diagnostics.lastSampleAttemptAt)
+        val lastSkip = diagnostics.lastSampleSkipReason
+
+        return if (lastSkip.isNullOrBlank()) {
+            getString(
+                R.string.telemetry_diagnostics_row_summary,
+                source,
+                runningText,
+                radioAge,
+                gnssAge,
+                sampleAge,
+            )
+        } else {
+            getString(
+                R.string.telemetry_diagnostics_row_blocked_summary,
+                source,
+                runningText,
+                lastSkip,
+            )
+        }
+    }
+
+    private fun showTelemetryDiagnosticsDialog() {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.setting_telemetry_diagnostics_title))
+            .setMessage(telemetryDiagnosticsSummary())
+            .setNeutralButton(getString(R.string.telemetry_diagnostics_copy_action)) { _, _ ->
+                copyTelemetryDiagnostics()
+            }
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun telemetrySourceLabel(): String =
+        ScannerService.currentState.diagnostics.telemetrySource.replaceFirstChar { it.uppercase() }
+
+    private fun telemetryRunningLabel(): String =
+        if (ScannerService.currentState.diagnostics.telemetrySourcesStarted) {
+            getString(R.string.telemetry_diagnostics_running)
+        } else {
+            getString(R.string.telemetry_diagnostics_waiting)
+        }
 
     private fun copyTelemetryDiagnostics() {
         val text = telemetryDiagnosticsSummary()
@@ -2182,6 +2274,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             seconds < 3_600L -> getString(R.string.telemetry_diagnostics_minutes_ago, seconds / 60L)
             else -> getString(R.string.telemetry_diagnostics_hours_ago, seconds / 3_600L)
         }
+    }
+
+    private fun formatTime(instant: Instant): String =
+        android.text.format.DateFormat.getTimeFormat(this).format(Date.from(instant))
+
+    private fun formatDateTime(instant: Instant): String {
+        val date = Date.from(instant)
+        val dateText = android.text.format.DateFormat.getDateFormat(this).format(date)
+        val timeText = android.text.format.DateFormat.getTimeFormat(this).format(date)
+        return "$dateText $timeText"
     }
 
     private fun showReportingEndpointDialog() {
@@ -3412,8 +3514,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val SCANNER_PERMISSION_REQUEST_CODE = 7001
         const val GNSS_AGE_TICK_MS = 1_000L
         const val REPORTING_COUNTDOWN_REFRESH_MS = 60_000L
-        const val MAIN_SETTINGS_SCROLL_TAG = "main-settings-scroll"
-        const val COVERAGE_DATA_SCROLL_TAG = "coverage-data-scroll"
         const val QUALITY_ANIMATION_DURATION_MS = 420L
         const val QUALITY_ANIMATION_FRAME_MS = 16L
         val SCANNER_BACKGROUND: Int = Color.rgb(0, 38, 62)

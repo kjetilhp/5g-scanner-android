@@ -6,21 +6,24 @@ Keep this file practical: near-term tasks, open product questions, and parked id
 
 - Run the device testing checklist before starting real collector work: `docs/device-testing-checklist.md`
 
-- Add an only measure 5g/LTE etc setting? If we ar looking for 5g coverage only, why measure lte? but bot or either is of interrest.
+- Decide whether a "5G only / LTE + 5G" collection setting is useful. LTE is still valuable context for real 5G coverage gaps, so avoid adding this unless field tests show a clear need.
 
-- Make it a true background service that can run for weeks even after reboots. This is the crowdsourcing part...
+- Decide the product/privacy path for true long-running background collection across reboots. The current prototype restores reporting alarms after boot, but does not restart active scanning from boot.
 
-- Make a "scheduler for monitoring". Set from and to hours and weekdays.
+- Add a participation schedule if field testing shows users need work-hours/weekdays scanning. Model it as scanner intent scheduling, not as a second scanner state.
 
-- A one off notification: have you forgotten us? if tracking is manually disabled for a long time
+- Consider a one-off reminder notification if scanning has been manually stopped for a long time. Keep it respectful and easy to dismiss.
 
-- Make sure db and settings are cleaned up on uninstall
+- Confirm local database, settings, and exported CSV cache behavior on uninstall/reinstall during device testing.
 
-- Add a sanitizer feature to prevent the db from growing to large?
+- Add retention/storage controls if field tests show local database growth is a real issue. Prefer clear user-facing language such as "recorded coverage data limit" over internal cleanup terms.
 
 - Plan and create a migration guard when the app is updated with breaking changes for database etc.
 
-- Discuss better running/running(error) visualizations: can it be shown in the device toolbar? can we have animation? ux?
-Add a stopped (not running) viz to make it clearer without having to open the app? App notification (dot on app icon) is still purple, not ideal, you said "green accent" what causes this, can we remedy it
+- Improve scanner state visibility outside the app: foreground notification color/text, stopped/error clarity, and whether the launcher/app notification accent can match the product colors.
 
-Two or more SIMs: sampler should collect all usable active subscriptions; later UI should show which SIM/subscription is displayed and possibly allow swipe left/right between them.
+- Two or more SIMs: sampler should collect all usable active subscriptions; later UI should show which SIM/subscription is displayed and possibly allow swipe left/right between them.
+
+- Keep settings screens on the RecyclerView path. Avoid custom scroll restoration, direct TextView refresh fields, or per-screen list refresh logic.
+
+- Field-test the About -> Developer telemetry diagnostics row. It should stay compact in the row and put copyable details in the dialog; add fields only when they answer "is telemetry alive, and where is it stuck?"

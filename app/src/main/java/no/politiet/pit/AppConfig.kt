@@ -28,6 +28,7 @@ object AppConfig {
         const val highAccuracyGnssRefreshMs: Long = 5_000L
         const val balancedGnssRefreshMs: Long = 11_000L
         const val lowPowerGnssRefreshMs: Long = 29_000L
+        const val diagnosticsRefreshMs: Long = 1_000L
     }
 
     object EnhancedPrivacy {

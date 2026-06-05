@@ -88,6 +88,21 @@ When Manual, Every 15 minutes, Daily, or Hourly is selected, settings should als
 
 When Every 15 minutes, Daily, or Hourly is selected, the app should schedule reporting from the current setting with Android's native scheduler. Continuous should not use the periodic scheduler; it should report when new signal measurements are collected. Until the first successful reporting trigger, Last sent should read `never`. Reporting is gated by app-level consent and network availability.
 
+### Recorded Coverage Data
+
+Recorded Coverage Data should present local database state and cleanup/export actions without exposing internal storage details.
+
+Current actions:
+
+- Export CSV through the Android Sharesheet when samples exist
+- Clear reported samples from local storage while keeping queued/unreported samples
+- Delete exported CSV cache files when cached share files exist
+- Delete all recorded coverage data after confirmation
+
+Use destructive styling only for actions that remove user-visible recorded coverage data broadly, such as deleting all samples or deleting exported files. Clearing already-reported local samples is a cleanup action and should use normal action styling.
+
+Settings, Recorded Coverage Data, and About should use the same RecyclerView-backed list pattern. Refreshes should replace row items through stable keys and content comparison so Android preserves scroll/viewport state during changing labels, countdowns, telemetry diagnostics, or incoming samples.
+
 ### Consent and Permissions
 
 Settings should include status and actions for:

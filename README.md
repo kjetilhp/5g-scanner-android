@@ -92,6 +92,7 @@ The emulator build currently uses mock telemetry. It supports:
 - Single stop/start control on the main scanner screen
 - View sample count, last sample time, and mock radio output
 - Separate settings screen for location mode, reporting, recorded coverage data, and About details
+- RecyclerView-backed Settings, Recorded Coverage Data, and About screens with data-driven row refreshes
 - Scanner state model: stopped, running, or error
 
 The Gradle wrapper is committed so the project can be built consistently from Android Studio or the command line.
@@ -190,7 +191,7 @@ stateDiagram-v2
 
 The About screen includes a small Developer section with a `Mock telemetry` toggle. It defaults to enabled so emulator development keeps using simulator-friendly radio/GNSS samples. Emulators always force mock telemetry even if the saved toggle is off. Turning it off on a physical device routes the scanner through the Android source classes and requires phone state permission for radio callbacks. The main scanner screen shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
-The same Developer section includes a compact telemetry diagnostics row for field testing. It shows whether mock or Android telemetry is active, whether telemetry sources are started, the active radio source count, last radio/GNSS update ages, the current GNSS request tier when exposed by the source, and the latest sample skip reason.
+The same Developer section includes a compact telemetry diagnostics row for field testing. The row summarizes whether mock or Android telemetry is active, whether sources are running or waiting, and the most useful current clue: recent radio/GNSS/sample ages or the latest sample skip reason. Tapping the row opens a copyable diagnostics dialog with source type, radio source count, radio/GNSS update ages, current GNSS request tier when exposed by the source, last sample attempt age, and latest sample skip reason.
 
 ## Location Mode and Quality
 
