@@ -113,6 +113,20 @@ Relevant planning docs:
 
 Prefer small, explicit models and tests around the output contract.
 
+Agent work should focus on coding, testing, debugging, and documentation. Avoid spending tokens on routine Git operations unless explicitly requested.
+
+Do not run `git add`, `git commit`, `git push`, create branches, or open pull requests unless the user explicitly asks for that Git action. Instead, describe the changes made, suggest a commit message when useful, and let the developer perform Git operations manually.
+
+## Token-Saving Preferences
+
+Keep routine progress updates brief. For small, clear tasks, implement directly without a separate plan.
+
+Avoid explaining standard tools, framework concepts, command output, or unchanged code unless it affects the work. Summarize only the relevant part of long logs or test failures.
+
+Inspect the files needed to make safe changes, but avoid broad repository tours unless the task requires architectural context.
+
+Final responses should be concise: describe what changed, what verification ran, and any important remaining risk or follow-up.
+
 Before making a commit, update `AGENTS.md` and `README.md` when the change affects project structure, setup steps, architecture direction, development workflow, or user-facing project status.
 
 Use `.\gradlew.bat assembleDebug` for the normal Android build verification and `.\gradlew.bat testDebugUnitTest` for local JVM unit tests.

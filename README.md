@@ -161,6 +161,33 @@ Enhanced privacy is applied before a sample is stored. It snaps fix timestamps t
 
 Running scanning is owned by `ScannerService`, a foreground service with a visible notification. `MainActivity` starts or stops the service based on consent, location and notification permissions, flight-mode/location guards, and the user scanner toggle, then renders the latest in-process service state. This lets scanning continue after the UI leaves the foreground. Automatic scanner restart after phone reboot is intentionally not enabled yet because modern Android treats boot-started location services as a stronger background-location case.
 
+The effective scanner state is derived from app consent, user intent, runtime permissions, device state, and Android service lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> ConsentGate
+    ConsentGate --> Stopped: Consent missing
+    ConsentGate --> PermissionCheck: Consent granted
+
+    Stopped --> PermissionCheck: User starts scanning
+    PermissionCheck --> Error: Missing permission / location off / flight mode / no telephony
+    PermissionCheck --> Running: All guards pass
+
+    Running --> Error: Temporary guard fails
+    Error --> Running: Guard clears and user still wants scanning
+    Running --> Stopped: User stops scanning
+    Error --> Stopped: User stops scanning
+
+    Running --> CollectTelemetry: Scanner tick or important radio event
+    CollectTelemetry --> SkipSample: No radio snapshot or no usable GNSS
+    CollectTelemetry --> StoreSample: Radio + acceptable GNSS paired
+    StoreSample --> QueueReporting: Coverage sample persisted
+    QueueReporting --> Running: Scheduled/manual/continuous reporting owns upload
+    SkipSample --> Running: Wait for next tick
+
+    Stopped --> [*]: Service stopped / notification removed
+```
+
 The About screen includes a small Developer section with a `Mock telemetry` toggle. It defaults to enabled so emulator development keeps using simulator-friendly radio/GNSS samples. Emulators always force mock telemetry even if the saved toggle is off. Turning it off on a physical device routes the scanner through the Android source classes and requires phone state permission for radio callbacks. The main scanner screen shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
 The same Developer section includes a compact telemetry diagnostics row for field testing. It shows whether mock or Android telemetry is active, whether telemetry sources are started, the active radio source count, last radio/GNSS update ages, the current GNSS request tier when exposed by the source, and the latest sample skip reason.
