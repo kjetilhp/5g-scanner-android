@@ -24,7 +24,9 @@ The first checked-in Android skeleton contains only `app/` and a simple native `
 
 ## Current Android Package Shape
 
-The prototype still uses a single Gradle `app` module, but code inside `no.politiet.pit` is split by responsibility:
+The prototype still uses a single Gradle `app` module, but code inside `no.politiet.pit.fivegscanner` is split by responsibility:
+
+The Android application id, manifest namespace, and Kotlin base package are all `no.politiet.pit.fivegscanner`.
 
 ```text
 domain/     Plain Kotlin modes and future scanner contract models
@@ -55,7 +57,7 @@ Cellular data should be treated as partial and device-dependent. The app should 
 
 Scanner sampling should keep GNSS and radio collection separate. Radio events or ticks should be paired with the latest acceptable GNSS fix by an assembler layer, then encoded to the shared JSONL contract. Radio callbacks are state updates, not direct sample writes: important radio changes may request a debounced near-term scanner tick, but the scanner tick remains the place where accepted samples are assembled and stored. The active emulator path uses `MockRadioTelemetrySource` and `MockGnssTelemetrySource`; physical-device radio collection now starts through `AndroidRadioTelemetrySource`.
 
-Telemetry source selection is centralized in `TelemetrySourceFactory`. The app has a Developer setting named `Mock telemetry`, persisted in app preferences and shown under About. Mock telemetry defaults to enabled for emulator-friendly development. Emulators force mock telemetry regardless of the saved toggle. When disabled on a physical device, the scanner service routes through `AndroidRadioTelemetrySource` and `AndroidGnssTelemetrySource`. The Android radio source registers `TelephonyCallback` on API 31+ and falls back to `PhoneStateListener` plus `requestCellInfoUpdate` on API 29-30; it maps registered LTE and NR serving cells into the existing sample model. The Android GNSS source uses `LocationManager`, keeps latest reported/usable fixes, and adapts request tier from low power while stationary to high accuracy while driving. The main scanner UI shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
+Telemetry source selection is centralized in `TelemetrySourceFactory`. The app has a Developer setting named `Mock telemetry`, persisted in app preferences and shown under About. Physical-device fresh installs default to Android telemetry. Emulators force mock telemetry regardless of the saved toggle, keeping emulator development simulator-friendly. When Android telemetry is active, the scanner service routes through `AndroidRadioTelemetrySource` and `AndroidGnssTelemetrySource`. The Android radio source registers `TelephonyCallback` on API 31+ and falls back to `PhoneStateListener` plus `requestCellInfoUpdate` on API 29-30; it maps registered LTE and NR serving cells into the existing sample model. The Android GNSS source uses `LocationManager`, keeps latest reported/usable fixes, and adapts request tier from low power while stationary to high accuracy while driving. The main scanner UI shows a subtle `MOCK` badge in the serving-cell line whenever mock telemetry is active.
 
 The About -> Developer telemetry diagnostics row should stay compact and practical. The row summarizes whether telemetry is mock or Android, whether sources are running or waiting, and either recent radio/GNSS/sample ages or the latest sample skip reason. Tapping the row opens a copyable diagnostics dialog with the fuller snapshot. Keep this as field-test feedback, not a general debug console.
 

@@ -4,7 +4,9 @@
     <string name="app_subtitle">5G/LTE coverage scanner</string>
     <string name="consent_intro">5G-Scanner helps build an evolving coverage map for 5G/LTE connectivity. Before it collects anything, it needs your consent.</string>
     <string name="consent_data_scope_title">Data collected</string>
-    <string name="consent_data_scope">When scanning is enabled, the app collects location, time and 5G/LTE signal measurements. Your device hardware and OS details are also collected. No further information about the user is collected.</string>
+    <string name="consent_data_scope">When scanning is enabled, the app collects location, time, 5G/LTE signal measurements, and device hardware/OS details.</string>
+    <string name="consent_phone_permission_title">Phone permission</string>
+    <string name="consent_phone_permission">Android groups mobile network signal access under Phone permission. 5G-Scanner uses it only for cellular network and signal measurements, not calls, contacts, or messages.</string>
     <string name="consent_storage_title">Storage and reporting</string>
     <string name="consent_local_only">Coverage samples are stored on this device and reported to our servers according to your reporting setting.</string>
     <string name="consent_control_title">Your control</string>
@@ -14,7 +16,7 @@
     <string name="no_data">Scanner not running</string>
     <string name="cannot_start_scanning">Cannot start scanning: %1$s</string>
     <string name="scanner_error_missing_location_permission">Missing location permission</string>
-    <string name="scanner_error_missing_phone_permission">Missing phone state permission</string>
+    <string name="scanner_error_missing_phone_permission">Allow phone permission to read mobile network signal</string>
     <string name="scanner_error_missing_notification_permission">Missing notification permission</string>
     <string name="scanner_error_location_disabled">Location is off</string>
     <string name="scanner_error_airplane_mode">Airplane mode is on</string>

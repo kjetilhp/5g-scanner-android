@@ -6,7 +6,7 @@ plugins {
 val releaseNotesAssetDir = layout.buildDirectory.dir("generated/releaseNotes/assets").get().asFile
 
 android {
-    namespace = "no.politiet.pit"
+    namespace = "no.politiet.pit.fivegscanner"
     compileSdk = 36
 
     defaultConfig {

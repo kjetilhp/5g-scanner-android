@@ -17,16 +17,19 @@ Use this before moving from emulator/mock testing into physical-device field tes
 - Granting consent requests the required Android permissions with no dead end.
 - After permissions are granted, scanning starts when the scanner toggle is running.
 - Mock telemetry badge appears on emulator.
-- On a physical device, mock telemetry can be disabled from About.
-- Disabling mock telemetry requests phone state permission if it has not already been granted.
+- On a physical device, mock telemetry is off by default and the main scanner screen does not show a mock badge.
+- On a physical device, Android radio/GNSS telemetry starts without visiting Developer settings when permissions and device state allow it.
+- Enabling mock telemetry from About -> Developer switches the scanner to mock sources for development.
+- Scanner, consent, and settings screens use readable status/navigation bar icon contrast.
+- Consent and settings screens follow the device light/dark mode.
 
 ## Scanning State
 
 - Stop scanning from the main screen.
 - Relaunch the app and confirm scanning remains stopped.
 - Start scanning again and confirm sample count increases.
-- With mock telemetry disabled on a physical device, confirm logcat shows Android radio telemetry registration and LTE/NR serving-cell updates when the device exposes them.
-- With mock telemetry disabled on a physical device, confirm logcat shows Android GNSS request tier changes and location fixes when location is enabled.
+- On a physical device, confirm logcat shows Android radio telemetry registration and LTE/NR serving-cell updates when the device exposes them.
+- On a physical device, confirm logcat shows Android GNSS request tier changes and location fixes when location is enabled.
 - In About -> Developer, confirm the telemetry diagnostics row gives a compact status summary and opens a copyable details dialog with Android/mock telemetry, started/waiting state, radio source count, radio/GNSS update ages, GNSS tier, and any sample skip reason.
 - Walk or drive briefly and confirm GNSS request tier moves toward balanced/high when speed increases, then back toward low when stationary.
 - Turn location off and confirm the app shows an error state instead of silently stopping.
