@@ -482,7 +482,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         telemetryBars = TelemetryBarsView().apply {
-            setLiveMetricProvider { latestTelemetry.metrics() }
             setMetrics(latestTelemetry.metrics(), animate = false)
         }
         telemetryHelpButton = measurementHelpButton()
@@ -518,10 +517,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             addView(content)
         }
         rfSignalBackground = RfSignalBackgroundView()
-        scrollView.setOnTouchListener { _, event ->
-            rfSignalBackground?.handleScannerTouch(event)
-            false
-        }
 
         stopStartButton = scannerIconButton(R.drawable.ic_stop_32, getString(R.string.stop_scanning), dp(56)) {
             handleStopStartAction()
@@ -529,17 +524,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
         scannerActivityRing = ScannerActivityRing()
 
-        return FrameLayout(this).apply {
+        return ScannerRootFrame().apply {
             setBackgroundColor(SCANNER_BACKGROUND)
             addView(rfSignalBackground, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ))
             addView(scrollView)
-            setOnTouchListener { _, event ->
-                rfSignalBackground?.handleScannerTouch(event)
-                false
-            }
             val controlBottomMargin = navigationBarHeight() + dp(160)
             addView(scannerActivityRing, FrameLayout.LayoutParams(dp(144), dp(144), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = controlBottomMargin - dp(16)
@@ -2536,6 +2527,42 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private inner class ScannerRootFrame : FrameLayout(this@MainActivity) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (!isTouchOnEnabledControl(event)) {
+                rfSignalBackground?.handleScannerTouch(event)
+            }
+            return super.dispatchTouchEvent(event)
+        }
+
+        private fun isTouchOnEnabledControl(event: MotionEvent): Boolean =
+            findEnabledControlAt(this, event.rawX.toInt(), event.rawY.toInt())
+
+        private fun findEnabledControlAt(view: View, rawX: Int, rawY: Int): Boolean {
+            if (!view.isShown) return false
+            if (view !== this && view.isEnabled && (view.isClickable || view.isLongClickable) && containsRawPoint(view, rawX, rawY)) {
+                return true
+            }
+            if (view is ViewGroup) {
+                for (index in view.childCount - 1 downTo 0) {
+                    if (findEnabledControlAt(view.getChildAt(index), rawX, rawY)) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        private fun containsRawPoint(view: View, rawX: Int, rawY: Int): Boolean {
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            return rawX >= location[0] &&
+                rawX < location[0] + view.width &&
+                rawY >= location[1] &&
+                rawY < location[1] + view.height
+        }
+    }
+
     private inner class RfSignalBackgroundView : View(this@MainActivity) {
         private var scanning = false
         private var scanStartedAtMs = 0L
@@ -3002,13 +3029,15 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         private var noDataAlpha = 0f
         private var barsAlpha = 1f
         private var animatedQualities: List<Float> = emptyList()
-        private var previousSampleQualities: List<Float> = emptyList()
         private var animatedPreviousQualities: List<Float> = emptyList()
+        private var animationStartQualities: List<Float> = emptyList()
+        private var animationTargetQualities: List<Float> = emptyList()
+        private var previousMarkerStartQualities: List<Float> = emptyList()
+        private var previousMarkerTargetQualities: List<Float> = emptyList()
         private var hasComparisonSample = false
-        private var liveMetricProvider: (() -> List<MetricQuality>)? = null
-        private var lastQualityFrameMs = 0L
-        private var barAnimator: ValueAnimator? = null
+        private var qualityAnimationStartMs = 0L
         private var visibilityAnimator: ValueAnimator? = null
+        private val qualityInterpolator = DecelerateInterpolator()
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = SCANNER_BAR_TRACK
             style = Paint.Style.FILL
@@ -3033,10 +3062,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
         private val previousPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
+            style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
-            strokeWidth = 1f
+            strokeWidth = dp(2).toFloat()
         }
-        private val previousArrowPath = Path()
         private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textAlign = Paint.Align.CENTER
@@ -3065,67 +3094,74 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             contentDescription = getString(R.string.no_data)
         }
 
-        fun setLiveMetricProvider(provider: (() -> List<MetricQuality>)?) {
-            liveMetricProvider = provider
-        }
-
         fun setMetrics(metrics: List<MetricQuality>, animate: Boolean) {
+            advanceQualityAnimationToNow()
+            val sameMetricShape = hasSameMetricShape(metrics)
             val previousQualities = displayedQualities()
+            val previousAnimationTarget = animationTargetQualities
+            val targetQualities = metrics.map { it.quality }
             setNoDataVisible(false, animate)
             this.metrics = metrics
             contentDescription = metrics.joinToString(separator = ", ") {
                 "${it.label} ${it.valueText}"
             }
 
-            barAnimator?.cancel()
-            if (!animate || previousQualities.size != metrics.size) {
-                animatedQualities = metrics.map { it.quality }
-                previousSampleQualities = emptyList()
-                animatedPreviousQualities = emptyList()
-                hasComparisonSample = false
-                lastQualityFrameMs = 0L
+            if (!animate || !sameMetricShape || previousQualities.size != metrics.size) {
+                setDisplayedQualities(targetQualities)
+                clearPreviousMarker()
+                clearQualityAnimation()
                 invalidate()
                 return
             }
 
-            val previousMarkerStart = previousSampleQualities
-            val previousMarkerEnd = previousQualities
-            previousSampleQualities = previousQualities
-            hasComparisonSample = previousMarkerStart.isNotEmpty() || sampleCount >= 2
-            animatedPreviousQualities = if (!hasComparisonSample) {
-                emptyList()
-            } else if (previousMarkerStart.size == previousMarkerEnd.size) {
-                previousMarkerEnd
-            } else {
-                previousMarkerEnd
+            if (isQualityAnimationRunning() && previousAnimationTarget == targetQualities) {
+                invalidate()
+                return
             }
+
+            animationStartQualities = previousQualities
+            animationTargetQualities = targetQualities
+            previousMarkerStartQualities = if (hasComparisonSample && animatedPreviousQualities.size == metrics.size) {
+                animatedPreviousQualities
+            } else {
+                previousQualities
+            }
+            previousMarkerTargetQualities = previousQualities
+            animatedPreviousQualities = previousMarkerStartQualities
+            hasComparisonSample = previousMarkerTargetQualities.isNotEmpty()
+            qualityAnimationStartMs = SystemClock.uptimeMillis()
             invalidate()
         }
 
         fun updateMetrics(metrics: List<MetricQuality>, showIfEmpty: Boolean) {
             if (metrics.isEmpty() && !showIfEmpty) return
+            advanceQualityAnimationToNow()
+            val sameMetricShape = hasSameMetricShape(metrics)
             setNoDataVisible(false, animate = false)
             this.metrics = metrics
             contentDescription = metrics.joinToString(separator = ", ") {
                 "${it.label} ${it.valueText}"
             }
-            if (animatedQualities.size != metrics.size) {
-                animatedQualities = metrics.map { it.quality }
-                lastQualityFrameMs = 0L
+            val targetQualities = metrics.map { it.quality }
+            if (!sameMetricShape || animatedQualities.size != metrics.size) {
+                setDisplayedQualities(targetQualities)
+                clearPreviousMarker()
+                clearQualityAnimation()
+            } else if (!isQualityAnimationRunning()) {
+                setDisplayedQualities(targetQualities)
             }
             invalidate()
         }
 
         fun showNoData(message: String = getString(R.string.no_data), isError: Boolean = false) {
-            barAnimator?.cancel()
+            advanceQualityAnimationToNow()
             setNoDataVisible(true, animate = true)
             noDataMessage = message
             noDataIsError = isError
             metrics = emptyList()
-            animatedQualities = emptyList()
-            previousSampleQualities = emptyList()
-            animatedPreviousQualities = emptyList()
-            hasComparisonSample = false
+            setDisplayedQualities(emptyList())
+            clearPreviousMarker()
+            clearQualityAnimation()
             contentDescription = message
             invalidate()
         }
@@ -3154,7 +3190,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             drawErrorPulseBackground(canvas)
-            refreshLiveMetricsForDraw()
             updateDisplayedQualitiesForFrame()
             if (showNoData || noDataAlpha > 0f) {
                 val centerY = if (noDataIsError) {
@@ -3204,17 +3239,11 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 drawMaskedBarFill(canvas, left, top, right, bottom, fillTop)
 
                 if (metric.kind == MetricKind.Radio) {
-                    animatedPreviousQualities.getOrNull(index)?.let { previousQuality ->
-                        val markerY = bottom - availableHeight * previousQuality.coerceIn(0f, 1f)
+                    previousMarkerQuality(index)?.let { previousQuality ->
+                        val markerY = (bottom - availableHeight * previousQuality.coerceIn(0f, 1f))
+                            .coerceIn(top + dp(2), bottom - dp(2))
                         previousPaint.alpha = (255 * barsAlpha).toInt().coerceIn(0, 255)
                         canvas.drawLine(left - dp(3), markerY, right + dp(3), markerY, previousPaint)
-                        drawPreviousMarkerArrow(
-                            canvas = canvas,
-                            x = right + dp(8),
-                            y = markerY,
-                            previousQuality = previousQuality,
-                            currentQuality = metric.quality,
-                        )
                         previousPaint.alpha = 255
                     }
                 }
@@ -3280,49 +3309,86 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         private fun errorBaseIconSize(): Int =
             minOf(width * 0.14f, height * 0.18f).toInt().coerceIn(dp(44), dp(72))
 
-        private fun refreshLiveMetricsForDraw() {
-            if (showNoData) return
-            val liveMetrics = liveMetricProvider?.invoke() ?: return
-            if (liveMetrics.isEmpty()) return
-            if (liveMetrics.size != metrics.size) {
-                metrics = liveMetrics
-                animatedQualities = liveMetrics.map { it.quality }
-                lastQualityFrameMs = 0L
-                return
-            }
-            metrics = liveMetrics
-        }
-
         private fun updateDisplayedQualitiesForFrame() {
             if (metrics.isEmpty()) return
-            val targets = metrics.map { it.quality }
-            if (animatedQualities.size != targets.size) {
-                animatedQualities = targets
-                lastQualityFrameMs = SystemClock.uptimeMillis()
+            if (!isQualityAnimationRunning()) {
+                if (animatedQualities.size != metrics.size) {
+                    setDisplayedQualities(metrics.map { it.quality })
+                    clearPreviousMarker()
+                }
                 return
             }
 
             val nowMs = SystemClock.uptimeMillis()
-            val elapsedMs = if (lastQualityFrameMs == 0L) QUALITY_ANIMATION_FRAME_MS else (nowMs - lastQualityFrameMs).coerceAtLeast(0L)
-            lastQualityFrameMs = nowMs
-            val progress = (elapsedMs.toFloat() / QUALITY_ANIMATION_DURATION_MS).coerceIn(0f, 1f)
-            if (progress <= 0f) return
-
-            animatedQualities = animatedQualities.zip(targets) { displayed, target ->
-                val next = displayed + (target - displayed) * progress
-                if (kotlin.math.abs(next - target) < 0.002f) target else next
+            val rawProgress = ((nowMs - qualityAnimationStartMs).toFloat() / QUALITY_ANIMATION_DURATION_MS).coerceIn(0f, 1f)
+            val progress = qualityInterpolator.getInterpolation(rawProgress)
+            animatedQualities = interpolateQualities(animationStartQualities, animationTargetQualities, progress)
+            if (hasComparisonSample) {
+                animatedPreviousQualities = interpolateQualities(previousMarkerStartQualities, previousMarkerTargetQualities, progress)
             }
+            if (rawProgress >= 1f) {
+                setDisplayedQualities(animationTargetQualities)
+                if (hasComparisonSample) {
+                    animatedPreviousQualities = previousMarkerTargetQualities
+                }
+                clearQualityAnimation()
+            }
+        }
+
+        private fun advanceQualityAnimationToNow() {
+            if (metrics.isEmpty() || !isQualityAnimationRunning()) return
+            updateDisplayedQualitiesForFrame()
         }
 
         private fun displayedQualities(): List<Float> =
             animatedQualities.ifEmpty { metrics.map { it.quality } }
 
-        private fun shouldKeepAnimatingBars(): Boolean {
-            val targets = metrics.map { it.quality }
-            return animatedQualities.size != targets.size ||
-                animatedQualities.zip(targets).any { (displayed, target) -> kotlin.math.abs(displayed - target) > 0.002f } ||
-                metrics.any { it.kind == MetricKind.Gnss }
+        private fun previousMarkerQuality(index: Int): Float? {
+            if (!hasComparisonSample) return null
+            return animatedPreviousQualities.getOrNull(index)
         }
+
+        private fun shouldKeepAnimatingBars(): Boolean {
+            return isQualityAnimationRunning()
+        }
+
+        private fun hasSameMetricShape(nextMetrics: List<MetricQuality>): Boolean =
+            metrics.size == nextMetrics.size &&
+                metrics.zip(nextMetrics).all { (current, next) ->
+                    current.label == next.label && current.kind == next.kind
+                }
+
+        private fun isQualityAnimationRunning(): Boolean =
+            qualityAnimationStartMs > 0L &&
+                animationStartQualities.size == animationTargetQualities.size &&
+                animationStartQualities.size == metrics.size
+
+        private fun setDisplayedQualities(qualities: List<Float>) {
+            animatedQualities = qualities
+            animationTargetQualities = qualities
+        }
+
+        private fun clearPreviousMarker() {
+            animatedPreviousQualities = emptyList()
+            previousMarkerStartQualities = emptyList()
+            previousMarkerTargetQualities = emptyList()
+            hasComparisonSample = false
+        }
+
+        private fun clearQualityAnimation() {
+            animationStartQualities = emptyList()
+            previousMarkerStartQualities = emptyList()
+            qualityAnimationStartMs = 0L
+        }
+
+        private fun interpolateQualities(
+            startQualities: List<Float>,
+            targetQualities: List<Float>,
+            progress: Float,
+        ): List<Float> =
+            startQualities.zip(targetQualities) { start, target ->
+                start + (target - start) * progress
+            }
 
         private fun setNoDataVisible(visible: Boolean, animate: Boolean) {
             if (showNoData == visible && noDataAlpha == if (visible) 1f else 0f) return
@@ -3403,30 +3469,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             canvas.restoreToCount(checkpoint)
         }
 
-        private fun drawPreviousMarkerArrow(
-            canvas: Canvas,
-            x: Float,
-            y: Float,
-            previousQuality: Float,
-            currentQuality: Float,
-        ) {
-            val delta = currentQuality - previousQuality
-            if (kotlin.math.abs(delta) < 0.03f) return
-
-            val size = dp(4).toFloat()
-            previousArrowPath.reset()
-            if (delta > 0f) {
-                previousArrowPath.moveTo(x, y - size)
-                previousArrowPath.lineTo(x - size, y + size)
-                previousArrowPath.lineTo(x + size, y + size)
-            } else {
-                previousArrowPath.moveTo(x, y + size)
-                previousArrowPath.lineTo(x - size, y - size)
-                previousArrowPath.lineTo(x + size, y - size)
-            }
-            previousArrowPath.close()
-            canvas.drawPath(previousArrowPath, previousPaint)
-        }
     }
 
     private inner class SignalQualityIconView : View(this@MainActivity) {
@@ -3629,7 +3671,6 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         const val GNSS_AGE_TICK_MS = 1_000L
         const val REPORTING_COUNTDOWN_REFRESH_MS = 60_000L
         const val QUALITY_ANIMATION_DURATION_MS = 420L
-        const val QUALITY_ANIMATION_FRAME_MS = 16L
         val SCANNER_BACKGROUND: Int = Color.rgb(0, 38, 62)
         val SCANNER_PANEL: Int = Color.argb(43, 255, 255, 255)
         val SCANNER_SOFT_TEXT: Int = Color.argb(204, 255, 255, 255)
