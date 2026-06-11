@@ -152,7 +152,7 @@ App icons are based on `assets/icon/source.svg`. Android launcher icons use adap
 
 Do not commit large generated datasets unless they are intentionally curated fixtures.
 
-Runtime defaults and tuning values that are natural to adjust during development belong in `app/src/main/java/no/politiet/pit/fivegscanner/AppConfig.kt` rather than being redefined across Activity, service, storage, reporting, or telemetry classes. Reporting endpoint and transport-mode defaults belong there too; the current default is the hosted Render mock endpoint. Temporary field-test endpoint overrides can be set from About -> Developer -> Reporting endpoint; the override is saved only after URL validation and an `OPTIONS` response that advertises `POST` support.
+Runtime defaults and tuning values that are natural to adjust during development belong in `app/src/main/java/no/politiet/pit/fivegscanner/AppConfig.kt` rather than being redefined across Activity, service, storage, reporting, or telemetry classes. Reporting endpoint and transport-mode defaults belong there too; the current default is the `deknings.info` measurements endpoint. Temporary field-test endpoint overrides can be set from About -> Developer -> Reporting endpoint; the override is saved only after URL validation and an `OPTIONS` response that advertises `POST` support.
 
 Use SemVer for app releases. Before the first real release, `0.x` versions may make breaking prototype changes as long as they are called out. After a release/shared build may contain user data or downstream consumers, use: MAJOR for breaking compatibility changes, MINOR for backward-compatible features, and PATCH for fixes/docs/polish.
 

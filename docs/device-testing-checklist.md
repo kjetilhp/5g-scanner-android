@@ -5,7 +5,7 @@ Use this before moving from emulator/mock testing into physical-device field tes
 ## Before Installing
 
 - Confirm the backend is reachable from the target device.
-- For emulator testing, use About -> Developer -> Reporting endpoint with `AppConfig.Reporting.emulatorHostEndpointUrl`.
+- For emulator testing, use About -> Developer -> Reporting endpoint with a host-reachable local URL such as `http://10.0.2.2:8080/api/coverage-samples`.
 - For physical-device testing, use About -> Developer -> Reporting endpoint with a URL the phone can reach, such as the host PC's LAN IP.
 - Run `.\gradlew.bat testDebugUnitTest`.
 - Run `.\gradlew.bat assembleDebug`.

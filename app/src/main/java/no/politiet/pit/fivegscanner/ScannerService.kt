@@ -59,7 +59,6 @@ class ScannerService : Service() {
     private var gnssMode = AppConfig.Defaults.gnssMode
     private var telemetryGnssMode = AppConfig.Defaults.gnssMode
     private var reportingMode = AppConfig.Defaults.reportingMode
-    private var mockTelemetryEnabled = AppConfig.Defaults.mockTelemetryEnabled
     private var enhancedPrivacyEnabled = AppConfig.Defaults.enhancedPrivacyEnabled
     private var effectiveMockTelemetry = AppConfig.Defaults.mockTelemetryEnabled
     private var lastSampleSkipReason: String? = null
@@ -147,11 +146,7 @@ class ScannerService : Service() {
 
         ensureNotificationChannel()
         val notification = scannerNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         publishState()
         if (scannerErrorReason() == null) {
             startTelemetrySources()
@@ -171,12 +166,7 @@ class ScannerService : Service() {
         diagnosticsRefreshScheduled = false
         stopTelemetrySources()
         publishStoppedState()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
@@ -188,7 +178,6 @@ class ScannerService : Service() {
         if (effectiveMockTelemetry != useMockTelemetry) {
             configureTelemetrySources(useMockTelemetry)
         }
-        mockTelemetryEnabled = settings.mockTelemetryEnabled
         enhancedPrivacyEnabled = settings.enhancedPrivacyEnabled
         if (telemetryGnssMode != gnssMode) {
             latestTelemetry = ScannerTelemetrySnapshot.initial(gnssMode)
@@ -285,7 +274,7 @@ class ScannerService : Service() {
 
         latestTelemetry = ScannerTelemetrySnapshot(radioTelemetry.first(), gnssTelemetry)
         radioTelemetry.forEach { radio ->
-            writeCoverageSample(sampleCount, capturedAt, ScannerTelemetrySnapshot(radio, gnssTelemetry))
+            writeCoverageSample(sampleCount, ScannerTelemetrySnapshot(radio, gnssTelemetry))
         }
         triggerContinuousReporting()
         publishState()
@@ -306,7 +295,7 @@ class ScannerService : Service() {
         publishState()
     }
 
-    private fun writeCoverageSample(sampleNumber: Int, capturedAt: Instant, telemetry: ScannerTelemetrySnapshot) {
+    private fun writeCoverageSample(sampleNumber: Int, telemetry: ScannerTelemetrySnapshot) {
         runCatching {
             val assemblyResult = CoverageSampleAssembler.servingSample(
                 radio = telemetry.radio,
@@ -476,7 +465,6 @@ class ScannerService : Service() {
     }
 
     private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             NOTIFICATION_CHANNEL_ID,
@@ -555,11 +543,7 @@ class ScannerService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, ScannerService::class.java).setAction(ACTION_START)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
